@@ -1,13 +1,15 @@
 /************************************************
- * Copyright (c) IBM Corp. 2007-2014
+ * Copyright (c) IBM Corp. 2014
  * All rights reserved. This program and the accompanying materials
  * are made available under the terms of the Eclipse Public License v1.0
  * which accompanies this distribution, and is available at
  * http://www.eclipse.org/legal/epl-v10.html
- * 
+ *************************************************/
+
+/*
  * Contributors:
  *     arayshu, lschneid - initial implementation
- *************************************************/
+ */
 
 #ifndef __SKV_ERRNO_HPP__
 #define __SKV_ERRNO_HPP__
@@ -61,7 +63,6 @@ typedef enum
   } skv_status_t;
 
 
-// modified from static char* because c++ standard defines constant string literals as const char[]
 static
 const char*
 skv_status_to_string( skv_status_t aStatus )

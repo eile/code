@@ -1,10 +1,12 @@
 /************************************************
- * Copyright (c) IBM Corp. 2007-2014
+ * Copyright (c) IBM Corp. 2014
  * All rights reserved. This program and the accompanying materials
  * are made available under the terms of the Eclipse Public License v1.0
  * which accompanies this distribution, and is available at
  * http://www.eclipse.org/legal/epl-v10.html
- * 
+ *************************************************/
+
+/*
  * Contributors:
  *     arayshu, lschneid - initial implementation
  *
@@ -14,7 +16,7 @@
  * 2. Establish a connection from the client to each node of the skv server group
  * 3. Provide a send/receive interface for short messages (queue)
  *    or long messages (rdma-like read/write)
- *************************************************/
+ */
 
 #ifndef __SKV_CLIENT_CONN_MANAGER_IF_HPP__
 #define __SKV_CLIENT_CONN_MANAGER_IF_HPP__
@@ -115,7 +117,7 @@ public:
   skv_status_t Finalize();
 
   // Makes a 1 by N connections to the server group
-  skv_status_t Connect( const char* aServerGroupName, int aFlags );
+  skv_status_t Connect( const char* aConfigFile, int aFlags );
 
   skv_status_t Disconnect();
 
@@ -133,8 +135,8 @@ public:
   skv_status_t Dispatch( int aNodeId, skv_client_ccb_t* aCCB );
 
   skv_status_t Dispatch( skv_client_server_conn_t*    aConn,
-                          skv_client_ccb_t*            aCCB,
-                          int                           aCmdOrd);
+                         skv_client_ccb_t*            aCCB,
+                         int                           aCmdOrd = -1);
 
   inline int GetServerConnCount() { return mServerConnCount; }
   inline skv_client_server_conn_t* GetServerConnections() { return mServerConns; }

@@ -1,13 +1,15 @@
 /************************************************
- * Copyright (c) IBM Corp. 2007-2014
+ * Copyright (c) IBM Corp. 2014
  * All rights reserved. This program and the accompanying materials
  * are made available under the terms of the Eclipse Public License v1.0
  * which accompanies this distribution, and is available at
  * http://www.eclipse.org/legal/epl-v10.html
- * 
+ *************************************************/
+
+/*
  * Contributors:
  *     arayshu, lschneid - initial implementation
- *************************************************/
+ */
 
 #include <client/skv_client_internal.hpp>
 #include <client/skv_c2s_active_broadcast.hpp>
@@ -130,6 +132,10 @@ C2S_ActiveBroadcast( skv_c2s_active_broadcast_func_type_t aFuncType,
                                                 aIncommingDataMgrIF,
                                                 mPZ_Hdl,
                                                 &BcastHdls[i] );
+    AssertLogLine( istatus == SKV_SUCCESS )
+      << "skv_client_internal_t:: ERROR: "
+      << " istatus: " << skv_status_to_string( istatus )
+      << EndLogLine;
   }
 
   int CompletedNodes = 0;

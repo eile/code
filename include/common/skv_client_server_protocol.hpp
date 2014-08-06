@@ -1,13 +1,15 @@
 /************************************************
- * Copyright (c) IBM Corp. 2007-2014
+ * Copyright (c) IBM Corp. 2014
  * All rights reserved. This program and the accompanying materials
  * are made available under the terms of the Eclipse Public License v1.0
  * which accompanies this distribution, and is available at
  * http://www.eclipse.org/legal/epl-v10.html
- * 
+ *************************************************/
+
+/*
  * Contributors:
  *     arayshu, lschneid - initial implementation
- *************************************************/
+ */
 
 #ifndef __SKV_CLIENT_SERVER_PROTOCOL_HPP__
 #define __SKV_CLIENT_SERVER_PROTOCOL_HPP__
@@ -21,8 +23,8 @@
 
 #include <common/skv_client_server_headers.hpp>
 
-#include <server/skv_server_types.hpp>
-#include <server/skv_server_cursor_manager_if.hpp>
+//#include <server/skv_server_types.hpp>
+//#include <server/skv_server_cursor_manager_if.hpp>
 #include <client/skv_client_conn_manager_if.hpp>
 
 /***************************************************
@@ -467,8 +469,6 @@ struct skv_cmd_retrieve_n_keys_req_t
       << "ERROR: status: " << status 
       << EndLogLine;
 
-    // mKeyDataCacheMemReg.mKeysDataCacheRMR = aKeysDataCacheRMR;        
-
     AssertLogLine( aMaxCachedKeysCount <= SKV_CLIENT_MAX_CURSOR_KEYS_TO_CACHE )
       << "skv_cmd_retrieve_n_keys_req_t::Init():: ERROR:: "
       << " aMaxCachedKeysCount: " << aMaxCachedKeysCount
@@ -559,67 +559,6 @@ struct skv_cmd_active_bcast_req_t
     return;
   }
 };
-
-struct skv_cmd_cursor_prefetch_req_t
-{
-  skv_client_to_server_cmd_hdr_t       mHdr;
-
-  uint64_t                             mServerCursorHandle;
-  uint64_t                             mBufferStart;
-  int                                  mBufferLen;
-  it_rmr_context_t                     mBufferRMR;
-  skv_cursor_flags_t                   mFlags;
-  int                                  mReqSeqNo;
-  int                                  mReqSrc;
-
-  void
-  Init( int aNodeId,
-        skv_client_conn_manager_if_t* aConnMgr,
-        skv_command_type_t aCmdType,
-        skv_server_event_type_t aEventType,
-        skv_client_ccb_t* aCmdCtrlBlk,
-        skv_server_cursor_hdl_t aServerCursorHandle,
-        char* aBufferStart,
-        int aBufferLen,
-        skv_cursor_flags_t aFlags,
-        it_lmr_handle_t aBufferLMR,
-        it_rmr_context_t aBufferRMR,
-        int aReqSeqNo,
-        int aReqSrc )
-  {
-    mHdr.Init( aEventType, aCmdCtrlBlk, aCmdType );
-
-    mServerCursorHandle = (uint64_t) (uintptr_t) aServerCursorHandle;
-    mBufferStart        = (uint64_t) (uintptr_t) aBufferStart;
-    mBufferLen          = aBufferLen;
-    mFlags              = aFlags;
-    mReqSeqNo           = aReqSeqNo;
-    mReqSrc             = aReqSrc;
-
-    /**
-     * Need to get the actual rmr context for a given end point (ep)
-     * Since the rmr key is specific to the network device 
-     * The network device is disambiguated by the ep handle
-     */
-    it_ep_handle_t epHandle;
-    skv_status_t pstatus = aConnMgr->GetEPHandle( aNodeId, &epHandle );
-    AssertLogLine( pstatus == SKV_SUCCESS )
-      << "ERROR: skv status: " << skv_status_to_string( pstatus )
-      << EndLogLine;
-
-    it_status_t status = itx_get_rmr_context_for_ep( epHandle, aBufferLMR, &mBufferRMR );
-
-    AssertLogLine( status == IT_SUCCESS )
-      << "ERROR: status: " << status 
-      << EndLogLine;
-
-    // mBufferRMR = aBufferRMR;
-
-    mHdr.SetCmdLength( sizeof(skv_cmd_cursor_prefetch_req_t) );
-    return;
-  }
-};
-
 /***************************************************/
 
 /***************************************************

@@ -1,13 +1,17 @@
 /************************************************
- * Copyright (c) IBM Corp. 2007-2014
+ * Copyright (c) IBM Corp. 2014
  * All rights reserved. This program and the accompanying materials
  * are made available under the terms of the Eclipse Public License v1.0
  * which accompanies this distribution, and is available at
  * http://www.eclipse.org/legal/epl-v10.html
- * 
+ *************************************************/
+
+/*
  * Contributors:
  *     arayshu, lschneid - initial implementation
- *************************************************/
+ */
+
+/* \todo This file has to be split up. There are way to many references to this file which pull in way too much unrelevant stuff!! */
 
 #ifndef __SKV_SERVER_TYPES_HPP__
 #define __SKV_SERVER_TYPES_HPP__
@@ -81,6 +85,7 @@ skv_server_state_to_string( skv_server_state_t aState )
       return "SKV_SERVER_STATE_UNKNOWN";
     }
   }
+  return "SKV_SERVER_STATE_UNKNOWN";
 }
 
 typedef enum
@@ -363,6 +368,8 @@ typedef enum {
 }  skv_server_command_class_t;
     
 
+#include <server/skv_local_kv_types.hpp>
+
 struct skv_server_ccb_t
 {
   skv_server_command_state_t   mState;  
@@ -370,6 +377,7 @@ struct skv_server_ccb_t
 
   skv_lmr_triplet_t*           mCtrlMsgSendTriplet;
   int                          mCtrlMsgSendBuffOrdinal;
+  skv_local_kv_cookie_t        mLocalKVCookie;
 
   skv_server_command_class_t   mCommandClass;
 
@@ -383,6 +391,7 @@ struct skv_server_ccb_t
     skv_server_command_active_bcast_t   mCommandActiveBcast;
   } mCommandState;
 
+  // holds response data that's returned by the local kv backend
   union
   {
     skv_server_local_kv_pdsopen_data_t mPDSOpen;
@@ -1771,6 +1780,7 @@ public:
   Enqueue( it_event_t* aEvent )
   {
     mQueue->push( *aEvent );
+    return SKV_SUCCESS;
   }
 
   int

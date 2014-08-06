@@ -1,13 +1,15 @@
 /************************************************
- * Copyright (c) IBM Corp. 2007-2014
+ * Copyright (c) IBM Corp. 2014
  * All rights reserved. This program and the accompanying materials
  * are made available under the terms of the Eclipse Public License v1.0
  * which accompanies this distribution, and is available at
  * http://www.eclipse.org/legal/epl-v10.html
- * 
+ *************************************************/
+
+/*
  * Contributors:
  *     arayshu, lschneid - initial implementation
- *************************************************/
+ */
 
 #ifndef __SKV_SERVER_PDSCNTL_COMMAND_SM_HPP__
 #define __SKV_SERVER_PDSCNTL_COMMAND_SM_HPP__
@@ -136,19 +138,20 @@ public:
               << " ord: " << aCommandOrdinal
               << EndLogLine;
 
-            skv_local_kv_cookie_t cookie( aCommandOrdinal, aEPState );
+            skv_local_kv_cookie_t *cookie = &Command->mLocalKVCookie;
+            cookie->Set( aCommandOrdinal, aEPState );
             switch( cntl_cmd )
             {
               case SKV_PDSCNTL_CMD_STAT_GET:
               case SKV_PDSCNTL_CMD_STAT_SET:
               {
-                status = aLocalKV->PDS_Stat( cntl_cmd, PDSAttr, &cookie );
+                status = aLocalKV->PDS_Stat( cntl_cmd, PDSAttr, cookie );
                 break;
               }
                     
               case SKV_PDSCNTL_CMD_CLOSE:
               {
-                status = aLocalKV->PDS_Close( PDSAttr, &cookie );
+                status = aLocalKV->PDS_Close( PDSAttr, cookie );
                 break;
               }
 

@@ -1,13 +1,15 @@
 /************************************************
- * Copyright (c) IBM Corp. 2007-2014
+ * Copyright (c) IBM Corp. 2014
  * All rights reserved. This program and the accompanying materials
  * are made available under the terms of the Eclipse Public License v1.0
  * which accompanies this distribution, and is available at
  * http://www.eclipse.org/legal/epl-v10.html
- * 
+ *************************************************/
+
+/*
  * Contributors:
  *     lschneid - initial implementation
- *************************************************/
+ */
 
 /*
  * This file contains the interface definition for interaction with
@@ -17,16 +19,19 @@
  * that they return with an error indicating that the operation requires
  * further internal processing.  Any user of the API must be able to handle
  * these types of return code and wait for a storage event that signals the
- * completion of the internal operation.
- * However, some local KV backends like the in-memory backend, are synchronous
- * in the sense that they will return with the operation immediately completed
+ * completion of the internal operation. Each API call provides a local-kv
+ * cookie that allow to forward user state to the completion event of the
+ * operation.
+ *
+ * However, this API allows synchronous mode of operation too. Some local KV
+ * back-ends like the in-memory back-end, are synchronous in the sense that
+ * they will return with the operation immediately completed.
  *
  * Note: Operations that read or write client data will not provide the actual
  * data but an RDMA address to read or write for the user of this API. This
  * allows the implementation of the local KV API to decide about buffering or
  * direct access.
  */
-
 
 #ifndef SKV_LOCAL_KV_INTERFACE_HPP_
 #define SKV_LOCAL_KV_INTERFACE_HPP_
@@ -38,11 +43,18 @@
 
 #include <server/skv_local_kv_types.hpp>
 
+// Include of required data types to work with various back ends
+#include <server/skv_local_kv_request.hpp>
+#include <common/skv_mutex.hpp>
+#include <server/skv_local_kv_request_queue.hpp>
+#include <server/skv_local_kv_event_queue.hpp>
+#include <server/skv_local_kv_rdma_data_buffer.hpp>
+
+
 // Include the list of defined local kv back ends
 #include <server/skv_local_kv_inmem.hpp>
 #include <server/skv_local_kv_asyncmem.hpp>
-#include <server/skv_local_kv_leveldb.hpp>
-
+#include <server/skv_local_kv_rocksdb.hpp>
 
 template<class skv_local_kv_manager>
 class skv_local_kv_interface
@@ -51,7 +63,6 @@ class skv_local_kv_interface
 
 public:
   skv_local_kv_interface() {}
-
 
   /**
    * Initializsation of the local KV manager
@@ -98,7 +109,8 @@ public:
   /**
    * Event retrieval function
    * This function will be called by the main server routine to ask for
-   * any pending events that might wait for processing
+   * any pending events that might wait for processing. A back-end implementation
+   * is expected to return a valid local kv event or NULL.
    *
    * \return pointer to the event that's to be processed,
    *         the pointer can only be reused after a corresponding
@@ -112,7 +124,7 @@ public:
   /**
    * Event Acknowledgement function
    * This function will be called by the main server routine to ack an Event
-   * and allow the back end to release/invalidate the event pointer
+   * and allow the back-end to release/invalidate the event pointer
    *
    * \param[in] aEvent  Event pointer to release
    *
@@ -133,22 +145,41 @@ public:
     return mLocalKVManager.CancelContext( aReqCtx );
   }
 
+  /**
+   * return the data distribution handle
+   *
+   * \param[out] aDist    returns a pointer to the distribution info
+   * \param[in]  aCookie  local-kv cookie
+   *
+   * \return  status of operation
+   */
   skv_status_t GetDistribution( skv_distribution_t **aDist,
                                 skv_local_kv_cookie_t *aCookie )
   {
     return mLocalKVManager.GetDistribution( aDist, aCookie );
   }
 
-  /* insertion of data
-   * - prepare the insertion of data (some backend might support direct rdma access and we want to know where the data should go)
+  /** general note: insertion of data
+   * - prepare the insertion of data (some backend might support direct rdma access
+   *   and we want to know where the data should go). This data is retrieved by a lookup
    * - do an insert attempt and try to complete immediately or return with special status for deferred action
    * - continue a multi-stage/large insertion that was deferred (or just check if we're complete already)
    */
-  //  skv_status_t InsertPrepare();
 
-  /* Request-based insertion
+  /** Request-based insertion
    * parses a request according to the CmdStatus and either does the insert
    * immediately or returns the target memory destination for the insert
+   *
+   * \param[in] aReq        request structure that contains the request metadata
+   * \param[in] aCmdStatus  status of the insert command - i.e. if data has been looked up already,
+   *                        the insert can move on to the next step immediately
+   * \param[in] aStoredValueRep  The client's representation of the data (especially contains the size)
+
+   * \param[out] aValueRDMADest  Where the SKV framework should place the data
+   *                             (invalid if return code is neither SKV_SUCCESS nor SKV_ERRNO_NEED_DATA_TRANSFER)
+   * \param[in] aCookie          local-kv cookie
+   *
+   * \return status of operation
    */
   skv_status_t Insert( skv_cmd_RIU_req_t *aReq,
                        skv_status_t aCmdStatus,
@@ -159,15 +190,18 @@ public:
     return mLocalKVManager.Insert( aReq, aCmdStatus, aStoredValueRep, aValueRDMADest, aCookie );
   }
 
-  skv_status_t InsertPostProcess( skv_local_kv_req_ctx_t *aReqCtx,
-                                  skv_lmr_triplet_t *aValueRDMADest,
-                                  skv_local_kv_cookie_t *aCookie )
-  {
-    return mLocalKVManager.InsertPostProcess( aReqCtx, aValueRDMADest, aCookie );
-  }
-
-
-  /* Buffer-based insertion */
+  /**
+   * Buffer-based insertion used by bulk-insert state machine
+   * Data is available in aRecordRep as a combination of key and value
+   *
+   * \param[in] aPDSId        PDS to insert
+   * \param[in] aRecordRep    key/value data representation in a byte-buffer
+   * \param[in] aKeySize      size of the key in the buffer (bytes: 0 to aKeySize)
+   * \param[in] aValueSize    size of the value in the buffer (bytes: aKeySize to aKeySize+aValueSize)
+   * \param[in] aCookie       local-kv cookie
+   *
+   * \return status of operation
+   */
   skv_status_t Insert( skv_pds_id_t& aPDSId,
                        char* aRecordRep,
                        int aKeySize,
@@ -177,13 +211,40 @@ public:
     return mLocalKVManager.Insert( aPDSId, aRecordRep, aKeySize, aValueSize, aCookie );
   }
 
+  /** Optional additional post-processing of insert
+   * Allows for post-processing of insert commands.
+   * For example, if a large insert required a data transfer and the network operation is complete
+   * and data was transferred to the insert buffer of the back-end, a call to InsertPostProcess() can
+   * now trigger the actual insert operation of the back-end.
+   *
+   * \param[in] aReqCtx         request context handle that allows the back-end to locate the state of the request
+   * \param[in] aValueRDMADest  rdma destination (e.g. for cleanup or data reference purposes)
+   * \param[in] aCookie         local-kv cookie
+   *
+   * \return status of operation
+   */
+  skv_status_t InsertPostProcess( skv_local_kv_req_ctx_t *aReqCtx,
+                                  skv_lmr_triplet_t *aValueRDMADest,
+                                  skv_local_kv_cookie_t *aCookie )
+  {
+    return mLocalKVManager.InsertPostProcess( aReqCtx, aValueRDMADest, aCookie );
+  }
+
+  /** Insert many key/values with one command
+   * parse the list of aLocalBuffer to insert multiple key/values in a batch
+   *
+   * \param[in] aPDSId         PDS to insert
+   * \param[in] aLocalBuffer   list of RDMA-coordinates that hold the key/value data
+   * \param[in] aCookie        local-kv cookie
+   *
+   * \return status of operation
+   */
   skv_status_t BulkInsert( skv_pds_id_t aPDSId,
                            skv_lmr_triplet_t *aLocalBuffer,
                            skv_local_kv_cookie_t *aCookie )
   {
     return mLocalKVManager.BulkInsert( aPDSId, aLocalBuffer, aCookie );
   }
-
 
   /* Retrieval of data
    * - prepare the retrieval of data (some backend might support direct rdma access and we want to know where the data should be picked)
@@ -201,10 +262,18 @@ public:
                          int *aTotalSize,
                          skv_local_kv_cookie_t *aCookie )
   {
-    return mLocalKVManager.Retrieve( aPDSId, aKeyData, aKeySize, aValueOffset, aValueSize, aFlags, aStoredValueRep, aTotalSize, aCookie );
+    return mLocalKVManager.Retrieve( aPDSId,
+                                     aKeyData,
+                                     aKeySize,
+                                     aValueOffset,
+                                     aValueSize,
+                                     aFlags,
+                                     aStoredValueRep,
+                                     aTotalSize,
+                                     aCookie );
   }
 
-  skv_status_t RetrievePostProcess(   skv_local_kv_req_ctx_t *aReqCtx )
+  skv_status_t RetrievePostProcess( skv_local_kv_req_ctx_t *aReqCtx )
   {
     return mLocalKVManager.RetrievePostProcess( aReqCtx );
   }
@@ -220,13 +289,13 @@ public:
                               skv_local_kv_cookie_t *aCookie )
   {
     return mLocalKVManager.RetrieveNKeys( aPDSId, aStartingKeyData, aStartingKeySize,
-                                          aRetrievedKeysSizesSegs, aRetrievedKeysCount,
-                                          aRetrievedKeysSizesSegsCount, aListOfKeysMaxCount,
+                                          aRetrievedKeysSizesSegs,
+                                          aRetrievedKeysCount,
+                                          aRetrievedKeysSizesSegsCount,
+                                          aListOfKeysMaxCount,
                                           aFlags,
                                           aCookie );
   }
-
-
 
   /* Lookup a key/partial key
    * - flag to return RDMAable location of record for RDMA read and/or write access
@@ -250,7 +319,6 @@ public:
   {
     return mLocalKVManager.Remove( aPDSId, aKeyData, aKeySize, aCookie );
   }
-
 
   /* PDS Access */
   skv_status_t PDS_Open( char *aPDSName,
@@ -317,7 +385,7 @@ public:
    * Deallocation of temporary buffer space, e.g. for transfer of bulk-data
    * THIS IS A SYNC METHOD
    */
-  skv_status_t Deallocate ( skv_lmr_triplet_t *aRDMARep )
+  skv_status_t Deallocate( skv_lmr_triplet_t *aRDMARep )
   {
     return mLocalKVManager.Deallocate( aRDMARep );
   }
@@ -338,12 +406,9 @@ public:
   }
 };
 
-
-
 /*
  * Type specification of the local-kv type
  */
 typedef skv_local_kv_interface<SKV_SERVER_LOCAL_KV> skv_local_kv_t;
-
 
 #endif /* SKV_LOCAL_KV_INTERFACE_HPP_ */

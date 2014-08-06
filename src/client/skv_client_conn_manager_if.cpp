@@ -1,13 +1,15 @@
 /************************************************
- * Copyright (c) IBM Corp. 2007-2014
+ * Copyright (c) IBM Corp. 2014
  * All rights reserved. This program and the accompanying materials
  * are made available under the terms of the Eclipse Public License v1.0
  * which accompanies this distribution, and is available at
  * http://www.eclipse.org/legal/epl-v10.html
- * 
+ *************************************************/
+
+/*
  * Contributors:
  *     arayshu, lschneid - initial implementation
- *************************************************/
+ */
 
 #include <client/skv_client_internal.hpp>
 #include <client/skv_client_conn_manager_if.hpp>
@@ -254,6 +256,7 @@ Finalize()
     free( mServerConns );
     mServerConns = NULL;
   }
+  return SKV_SUCCESS;
 }
 
 /***
@@ -269,17 +272,12 @@ Finalize()
  ***/
 skv_status_t 
 skv_client_conn_manager_if_t::
-Connect( const char* aServerGroupName, 
+Connect( const char* aConfigFile,
          int   aFlags )
 {
-  AssertLogLine( aServerGroupName != NULL )
-    << "skv_client_conn_manager_if_t::Connect():: ERROR: "
-    << " aServerGroupName != NULL"
-    << EndLogLine;
-
   BegLogLine( SKV_CLIENT_CONN_INFO_LOG )
     << "skv_client_conn_manager_if_t::Connect():: Entering "
-    << " aServerGroupName: " << aServerGroupName
+    << " aServerGroupName: " << aConfigFile
     << " aFlags: " << aFlags
     << EndLogLine;
 
@@ -293,7 +291,7 @@ Connect( const char* aServerGroupName,
     << " MyHostname: " << MyHostname
     << EndLogLine;
 
-  skv_configuration_t *config = skv_configuration_t::GetSKVConfiguration();
+  skv_configuration_t *config = skv_configuration_t::GetSKVConfiguration( aConfigFile );
 
   BegLogLine( SKV_CLIENT_CONN_INFO_LOG )
     << "skv_client_conn_manager_if_t::Connect():: "
@@ -517,8 +515,8 @@ ConnectToServer( int                        aServerRank,
   // ep_attr.srv.rc.max_rdma_read_segments    = 4 * MULT_FACTOR_2;
   ep_attr.srv.rc.max_rdma_read_segments    = SKV_SERVER_MAX_RDMA_WRITE_SEGMENTS;
   ep_attr.srv.rc.max_rdma_write_segments   = SKV_SERVER_MAX_RDMA_WRITE_SEGMENTS;
-  ep_attr.srv.rc.rdma_read_ird             = SKV_MAX_COMMANDS_PER_EP * MULT_FACTOR_2;
-  ep_attr.srv.rc.rdma_read_ord             = SKV_MAX_COMMANDS_PER_EP * MULT_FACTOR_2;
+  ep_attr.srv.rc.rdma_read_ird             = SKV_MAX_COMMANDS_PER_EP;// * MULT_FACTOR_2;
+  ep_attr.srv.rc.rdma_read_ord             = SKV_MAX_COMMANDS_PER_EP;// * MULT_FACTOR_2;
   ep_attr.srv.rc.srq                       = (it_srq_handle_t) IT_NULL_HANDLE;
   ep_attr.srv.rc.soft_hi_watermark         = 0;
   ep_attr.srv.rc.hard_hi_watermark         = 0;
@@ -718,10 +716,14 @@ ConnectToServer( int                        aServerRank,
         if( event_cmm.conn.private_data_present )
         {
           BegLogLine( SKV_CLIENT_CONN_INFO_LOG )
-            << " Retrieved Private Data value: " << *(skv_rmr_triplet_t*)event_cmm.conn.private_data
+            << " Retrieved Private Data value: " << *(reinterpret_cast<skv_rmr_triplet_t*>(event_cmm.conn.private_data))
             << EndLogLine;
 
           aServerConn->mServerCommandMem = *((it_rmr_triplet_t*) (event_cmm.conn.private_data));
+          // host-endian conversions. Data gets transferred in BE
+          aServerConn->mServerCommandMem.mRMR_Addr = be64toh( aServerConn->mServerCommandMem.mRMR_Addr );
+          aServerConn->mServerCommandMem.mRMR_Len = be64toh( aServerConn->mServerCommandMem.mRMR_Len );
+          aServerConn->mServerCommandMem.mRMR_Context = be64toh( aServerConn->mServerCommandMem.mRMR_Context );
         }
         else
         {
@@ -963,7 +965,7 @@ skv_status_t
 skv_client_conn_manager_if_t::
 Dispatch( skv_client_server_conn_t*    aConn,
           skv_client_ccb_t*            aCCB,
-          int                           aCmdOrd = -1 )
+          int                          aCmdOrd )
 {
   it_status_t status = IT_SUCCESS;
 
@@ -1208,6 +1210,8 @@ ProcessCCB( skv_client_server_conn_t*    aConn,
                                                      mMyRankInGroup,
                                                      gSKVClientConnProcessRecv );
 
+  skv_status_t status = SKV_ERRNO_UNSPECIFIED_ERROR;
+
   skv_server_to_client_cmd_hdr_t* Hdr = (skv_server_to_client_cmd_hdr_t *) aCCB->GetRecvBuff();
 
   skv_command_type_t CommandType = aCCB->mCommand.mType;
@@ -1251,48 +1255,48 @@ ProcessCCB( skv_client_server_conn_t*    aConn,
   {
     case SKV_COMMAND_OPEN:
     {
-      skv_client_open_command_sm::Execute( aConn, aCCB );
+      status = skv_client_open_command_sm::Execute( aConn, aCCB );
       break;
     }
     case SKV_COMMAND_PDSCNTL:
     case SKV_COMMAND_CLOSE:
     {
-      skv_client_pdscntl_command_sm::Execute( aConn, aCCB );
+      status = skv_client_pdscntl_command_sm::Execute( aConn, aCCB );
       break;
     }
     case SKV_COMMAND_RETRIEVE_DIST:
     {
-      skv_client_retrieve_dist_command_sm::Execute( aConn, aCCB );
+      status = skv_client_retrieve_dist_command_sm::Execute( aConn, aCCB );
       break;
     }
     case SKV_COMMAND_INSERT:
     {
-      skv_client_insert_command_sm::Execute( this, aConn, aCCB );
+      status = skv_client_insert_command_sm::Execute( this, aConn, aCCB );
       break;
     }
     case SKV_COMMAND_BULK_INSERT:
     {
-      skv_client_bulk_insert_command_sm::Execute( this, aConn, aCCB );
+      status = skv_client_bulk_insert_command_sm::Execute( this, aConn, aCCB );
       break;
     }
     case SKV_COMMAND_RETRIEVE:
     {
-      skv_client_retrieve_command_sm::Execute( this, aConn, aCCB );
+      status = skv_client_retrieve_command_sm::Execute( this, aConn, aCCB );
       break;
     }
     case SKV_COMMAND_RETRIEVE_N_KEYS:
     {
-      skv_client_retrieve_n_keys_command_sm::Execute( this, aConn, aCCB );
+      status = skv_client_retrieve_n_keys_command_sm::Execute( this, aConn, aCCB );
       break;
     }
     case SKV_COMMAND_REMOVE:
     {
-      skv_client_remove_command_sm::Execute( this, aConn, aCCB );
+      status = skv_client_remove_command_sm::Execute( this, aConn, aCCB );
       break;
     }
     case SKV_COMMAND_ACTIVE_BCAST:
     {
-      skv_client_active_bcast_command_sm::Execute( this, aConn, aCCB );
+      status = skv_client_active_bcast_command_sm::Execute( this, aConn, aCCB );
 
       break;
     }
@@ -1306,6 +1310,7 @@ ProcessCCB( skv_client_server_conn_t*    aConn,
       break;
     }
   }
+  return status;
 }
 
 /***
@@ -1322,7 +1327,7 @@ ProcessOverflow( skv_client_server_conn_t* aConn )
   while( ( aConn->mOverflowCommands->size() > 0 ) &&
          ( aConn->mUnretiredRecvCount < SKV_MAX_UNRETIRED_CMDS ) )
   {
-    BegLogLine( SKV_CLIENT_PROCESS_CONN_LOG | SKV_CLIENT_PROCESS_CONN_N_DEQUEUE_LOG | SKV_CLIENT_TRACK_MESSGES_LOG )
+    BegLogLine( (SKV_CLIENT_PROCESS_CONN_LOG | SKV_CLIENT_PROCESS_CONN_N_DEQUEUE_LOG | SKV_CLIENT_TRACK_MESSGES_LOG) )
       << "skv_client_conn_manager_if_t::ProcessOverflow(): CMD from overflow queue " << aConn->mOverflowCommands->size()
       << EndLogLine;
 

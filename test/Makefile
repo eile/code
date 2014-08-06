@@ -1,27 +1,25 @@
 ########################################
-#Copyright (c) IBM Corp. 2007-2014
+#Copyright (c) IBM Corp. 2014
 #All rights reserved. This program and the accompanying materials
 #are made available under the terms of the Eclipse Public License v1.0
 #which accompanies this distribution, and is available at
 #http://www.eclipse.org/legal/epl-v10.html
+########################################
+
 #
 #Contributors:
 #    arayshu, lschneid - initial implementation
-########################################
-ifndef TOP
-    TOP = $(shell while ! test -e make.conf.in; do cd ..; done; pwd)
-    export TOP
+ifndef SKV_TOP
+    SKV_TOP=$(shell while ! test -e make.conf.in; do cd ..; done; pwd)
+    export SKV_TOP
 endif
 
 # picks up SKV-specific settings
 # e.g.: SKV_DEST, SKV_BASE_DIR, SKV_BUILD_DIR, SKV_GLOBAL_*FLAGS, ...
-include ${TOP}/make.conf
+include ${SKV_TOP}/make.conf
 
-ifeq ( $(SKV_FOR_NONBGQ), "yes" )
+
 SRC_C=skv_test_clib.c \
-else
-SRC_C=
-endif
 
 
 SRC_CPP=skv_test_insert_retrieve_sync.cpp \
@@ -31,13 +29,19 @@ SRC_CPP=skv_test_insert_retrieve_sync.cpp \
 	skv_test_bulk.cpp \
 	skv_base_test.cpp \
 
-SKV_CXXFLAGS=-O2 -g ${ASF_GLOBAL_CXXFLAGS} -I${SKV_INCLUDE_DIR} ${SKV_GLOBAL_CXXFLAGS} #-DSKV_CLIENT_UNI
-SKV_CFLAGS=${SKV_CXXFLAGS} -DSKV_PURE
-SKV_LDFLAGS=-O2 -g ${ASF_GLOBAL_CXXFLAGS} ${SKV_GLOBAL_LDFLAGS}
+ifeq ( $(SKV_LOCAL_KV_BACKEND), rocksdb )
+  SRC_CPP+=rocksdb_test.cpp
+endif
+
+
+SKV_CXXFLAGS=-O2 -g -I${SKV_INCLUDE_DIR} ${SKV_GLOBAL_CXXFLAGS} #-DSKV_CLIENT_UNI
+SKV_CFLAGS=${SKV_CXXFLAGS} ${SKV_GLOBAL_CFLAGS} -DSKV_PURE
+SKV_LDFLAGS=-O2 -g ${SKV_GLOBAL_LDFLAGS}
 MPICLIENT_LIBS=${SKV_BUILD_DIR}/libskv_client_mpi.a ${SKV_BUILD_DIR}/libskv_common.a
 UNICLIENT_LIBS=${SKV_BUILD_DIR}/libskv_client.a ${SKV_BUILD_DIR}/libskv_common.a
-SKV_MPI_CLIBS=${SKV_BUILD_DIR}/libskvc_mpi.a -lm
-SKV_UNI_CLIBS=${SKV_BUILD_DIR}/libskvc.a -lm
+SKV_MPI_CLIBS=${SKV_BUILD_DIR}/libskvc_mpi.a -lm ${SKV_GLOBAL_LDFLAGS}
+SKV_UNI_CLIBS=${SKV_BUILD_DIR}/libskvc.a -lm ${SKV_GLOBAL_LDFLAGS}
+
 
 #includes_test.cpp test_errno.cpp test_skv_utils.cpp
 TESTS=$(SRC_CPP:%.cpp=${SKV_BUILD_DIR}/%) $(SRC_C:%.c=${SKV_BUILD_DIR}/%)
@@ -54,10 +58,6 @@ ${SKV_BUILD_DIR}/skv_test_insert_retrieve_sync: ${SKV_BUILD_DIR}/skv_test_insert
 	${VV}$(MPICXX) $< ${MPICLIENT_LIBS} ${SKV_LDFLAGS} -o $@
 
 ${SKV_BUILD_DIR}/skv_test_insert_retrieve_async: ${SKV_BUILD_DIR}/skv_test_insert_retrieve_async.o
-	@echo "Building $@"
-	${VV}$(MPICXX) $< ${MPICLIENT_LIBS} ${SKV_LDFLAGS} -o $@
-
-${SKV_BUILD_DIR}/skv_test_random_insert: ${SKV_BUILD_DIR}/skv_test_random_insert.o
 	@echo "Building $@"
 	${VV}$(MPICXX) $< ${MPICLIENT_LIBS} ${SKV_LDFLAGS} -o $@
 
@@ -81,6 +81,9 @@ ${SKV_BUILD_DIR}/skv_test_clib: ${SKV_BUILD_DIR}/skv_test_clib.o
 	@echo "Building skv_size_test"
 	${VV}$(MPICXX) $< ${SKV_MPI_CLIBS} ${CLIB_LDFLAGS} -o $@
 
+${SKV_BUILD_DIR}/rocksdb_test: ${SKV_BUILD_DIR}/rocksdb_test.o
+	@echo "Building $@"
+	${VV}$(CXX) $< ${SKV_LDFLAGS} -o $@
 
 ###############################################
 # no customization should be required below this line
@@ -105,7 +108,6 @@ install: build
 	@echo "Starting install now..."
 	install -D -m 755 ${SKV_BUILD_DIR}/skv_test_insert_retrieve_sync ${SKV_INSTALL_DIR}/bin/skv_test_insert_retrieve_sync
 	install -D -m 755 ${SKV_BUILD_DIR}/skv_test_insert_retrieve_async ${SKV_INSTALL_DIR}/bin/skv_test_insert_retrieve_async
-	install -D -m 755 ${SKV_BUILD_DIR}/skv_test_random_insert ${SKV_INSTALL_DIR}/bin/skv_test_random_insert
 	install -D -m 755 ${SKV_BUILD_DIR}/test_skv_remove_command ${SKV_INSTALL_DIR}/bin/test_skv_remove_command
 	install -D -m 755 ${SKV_BUILD_DIR}/test_skv_insert_command ${SKV_INSTALL_DIR}/bin/test_skv_insert_command
 	install -D -m 755 ${SKV_BUILD_DIR}/skv_test_bulk ${SKV_INSTALL_DIR}/bin/skv_test_bulk

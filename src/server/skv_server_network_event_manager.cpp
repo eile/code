@@ -1,13 +1,15 @@
 /************************************************
- * Copyright (c) IBM Corp. 2007-2014
+ * Copyright (c) IBM Corp. 2014
  * All rights reserved. This program and the accompanying materials
  * are made available under the terms of the Eclipse Public License v1.0
  * which accompanies this distribution, and is available at
  * http://www.eclipse.org/legal/epl-v10.html
- * 
+ *************************************************/
+
+/*
  * Contributors:
  *     arayshu, lschneid - initial implementation
- *************************************************/
+ */
 
 #include <FxLogger.hpp>
 #include <common/skv_config.hpp>
@@ -244,13 +246,14 @@ Init( int aPartitionSize,
 #endif
   do
   {
-    conn_qual.conn_qual.lr_port.local = htons( SKVConfig->GetSKVServerPort() + listen_attempts );
+    conn_qual.conn_qual.lr_port.local = htons( (uint16_t)SKVConfig->GetSKVServerPort() + listen_attempts );
 
 
     BegLogLine( SKV_SERVER_NETWORK_EVENT_MANAGER_LOG )
       << "skv_server_t::Init(): attempting to listen:"
       << " aRank: " << aRank
       << " conn_qual.conn_qual.lr_port.local: " << conn_qual.conn_qual.lr_port.local
+      << " config.port: " << SKVConfig->GetSKVServerPort()
       << EndLogLine;
 
     itstatus = it_listen_create( mIA_Hdl,
@@ -269,7 +272,8 @@ Init( int aPartitionSize,
     << " itstatus: " << itstatus
     << EndLogLine;  
 
-  SKVConfig->SetSKVServerPort( conn_qual.conn_qual.lr_port.local );
+  // have to update the skv server in the config in case it has changed during listen attempts
+  SKVConfig->SetSKVServerPort( ntohs(conn_qual.conn_qual.lr_port.local) );
   /***********************************************************/
 
   if( itstatus == IT_SUCCESS )
@@ -360,13 +364,13 @@ InitNewStateForEP( EPStateMap_T* aEPStateMap,
 
   ep_attr.srv.rc.rdma_read_enable        = IT_TRUE;
   ep_attr.srv.rc.rdma_write_enable       = IT_TRUE;
-  ep_attr.srv.rc.max_rdma_read_segments  = SKV_MAX_COMMANDS_PER_EP * MULT_FACTOR_2;
+  ep_attr.srv.rc.max_rdma_read_segments  = SKV_SERVER_MAX_RDMA_WRITE_SEGMENTS; // * MULT_FACTOR_2;
   //ep_attr.srv.rc.max_rdma_write_segments = 4 * MULT_FACTOR_2;
   //ep_attr.srv.rc.max_rdma_write_segments = 24;
-  ep_attr.srv.rc.max_rdma_write_segments = SKV_MAX_COMMANDS_PER_EP * MULT_FACTOR_2;
+  ep_attr.srv.rc.max_rdma_write_segments = SKV_SERVER_MAX_RDMA_WRITE_SEGMENTS; // * MULT_FACTOR_2;
 
-  ep_attr.srv.rc.rdma_read_ird           = SKV_MAX_COMMANDS_PER_EP * MULT_FACTOR_2;
-  ep_attr.srv.rc.rdma_read_ord           = SKV_MAX_COMMANDS_PER_EP * MULT_FACTOR_2;
+  ep_attr.srv.rc.rdma_read_ird           = SKV_MAX_COMMANDS_PER_EP; // * MULT_FACTOR_2;
+  ep_attr.srv.rc.rdma_read_ord           = SKV_MAX_COMMANDS_PER_EP; // * MULT_FACTOR_2;
 
   ep_attr.srv.rc.srq                     = (it_srq_handle_t) IT_NULL_HANDLE;
   ep_attr.srv.rc.soft_hi_watermark       = 0;

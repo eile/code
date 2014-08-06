@@ -1,18 +1,23 @@
 /************************************************
- * Copyright (c) IBM Corp. 2007-2014
+ * Copyright (c) IBM Corp. 2014
  * All rights reserved. This program and the accompanying materials
  * are made available under the terms of the Eclipse Public License v1.0
  * which accompanies this distribution, and is available at
  * http://www.eclipse.org/legal/epl-v10.html
- * 
+ *************************************************/
+
+/*
  * Contributors:
  *     arayshu, lschneid - initial implementation
- *************************************************/
+ */
 
 #ifndef __SKV_SERVER_HEAP_MANAGER_HPP__
 #define __SKV_SERVER_HEAP_MANAGER_HPP__
 
+#ifndef SKV_CLIENT_UNI
 #include <mpi.h>
+#endif
+
 #include <limits>
 #include <iostream>
 #include <dlmalloc.h>
@@ -32,7 +37,7 @@
 #define MY_HOSTNAME_SIZE 128
 
 //#define PERSISTENT_IMAGE_MAX_LEN                ( 2u * 1024u * 1024u * 1024u )
-#define PERSISTENT_IMAGE_MAX_LEN                ( 1u * 512u * 1024u * 1024u )
+#define PERSISTENT_IMAGE_MAX_LEN                ( 3u * 1024u * 1024u * 1024u )
 //#define PERSISTENT_IMAGE_MAX_LEN                ( 1024u * 1024u * 1024u )
 //#define PERSISTENT_IMAGE_MAX_LEN                ( 1724u * 1024u * 1024u )
 
@@ -124,7 +129,7 @@ public:
 
   static
   void
-  Dump( char* aPath )
+  Sync()
   {
     // Flush the mmaped file
     int rc = msync( mMemoryAllocation, mTotalLen, MS_SYNC );
@@ -138,10 +143,16 @@ public:
       << "ERROR: rc: " << rc
       << " errno: " << errno
       << EndLogLine;
-
-    int MyRank;  
+  }
+  static
+  void
+  Dump( char* aPath )
+  {
+    Sync();
+    int MyRank = 0;
+#ifndef SKV_CLIENT_UNI
     MPI_Comm_rank( MPI_COMM_WORLD, & MyRank );
-
+#endif
     skv_configuration_t *config = skv_configuration_t::GetSKVConfiguration();
 
     char persistentFilename[ PERSISTENT_FILEPATH_MAX_SIZE ];
@@ -333,9 +344,10 @@ public:
     char* persistentFileMapAddress = NULL;
     int  mmapFlags = MAP_SHARED;
 
-    int MyRank;  
+    int MyRank = 0;
+#ifndef SKV_CLIENT_UNI
     MPI_Comm_rank( MPI_COMM_WORLD, & MyRank );
-
+#endif
     skv_configuration_t *config = skv_configuration_t::GetSKVConfiguration();
 
     char PersistentLocalFilePath[ 128 ];

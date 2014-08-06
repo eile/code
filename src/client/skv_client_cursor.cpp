@@ -1,13 +1,15 @@
 /************************************************
- * Copyright (c) IBM Corp. 2007-2014
+ * Copyright (c) IBM Corp. 2014
  * All rights reserved. This program and the accompanying materials
  * are made available under the terms of the Eclipse Public License v1.0
  * which accompanies this distribution, and is available at
  * http://www.eclipse.org/legal/epl-v10.html
- * 
+ *************************************************/
+
+/*
  * Contributors:
  *     arayshu, lschneid - initial implementation
- *************************************************/
+ */
 
 #include <client/skv_client_internal.hpp>
 #include <common/skv_utils.hpp>
@@ -18,6 +20,10 @@
 
 #ifndef SKV_CLIENT_RETRIEVE_N_KEYS_DIST_LOG
 #define SKV_CLIENT_RETRIEVE_N_KEYS_DIST_LOG ( 0 | SKV_LOGGING_ALL )
+#endif
+
+#ifndef SKV_CLIENT_RETRIEVE_N_KEYS_DATA_LOG
+#define SKV_CLIENT_RETRIEVE_N_KEYS_DATA_LOG ( 0 )
 #endif
 
 /**********************************************************
@@ -122,7 +128,14 @@ RetrieveNextCachedKey( skv_client_cursor_handle_t   aCursorHdl,
     << " aRetrievedValueBuffer: " << (void *) aRetrievedValueBuffer
     << " aRetrievedValueSize: " << aRetrievedValueSize
     << " aRetrievedValueMaxSize: " << aRetrievedValueMaxSize
+    << " mCurrentCachedKey: " << (void*)aCursorHdl->mCurrentCachedKey
+    << " mCachedKeys: " << (void*)aCursorHdl->mCachedKeys
     << " aFlags: " << aFlags
+    << " Key: " << *(int*)(aCursorHdl->mCurrentCachedKey + sizeof(int))
+    << EndLogLine;
+
+  BegLogLine( SKV_CLIENT_RETRIEVE_N_KEYS_DATA_LOG )
+    << " CachedKeys@"<< (void*)aCursorHdl->mCachedKeys << ": " << HexDump( aCursorHdl->mCachedKeys, SKV_CACHED_KEYS_BUFFER_SIZE )
     << EndLogLine;
 
   AssertLogLine( aCursorHdl->mCurrentCachedKey >= aCursorHdl->mCachedKeys &&
@@ -132,7 +145,7 @@ RetrieveNextCachedKey( skv_client_cursor_handle_t   aCursorHdl,
     << " aCursorHdl->mCachedKeysCount: " << aCursorHdl->mCachedKeysCount
     << EndLogLine;
 
-  int CachedKeySize = *((int *) aCursorHdl->mCurrentCachedKey );  
+  int CachedKeySize = *((int *) aCursorHdl->mCurrentCachedKey );
 
   if( CachedKeySize > aRetrievedKeyMaxSize )
   {
@@ -268,6 +281,10 @@ RetrieveNKeys( skv_client_cursor_handle_t  aCursorHdl,
              SKV_CLIENT_MAX_CURSOR_KEYS_TO_CACHE );    
   /*****************************************************/
 
+  BegLogLine( SKV_CLIENT_RETRIEVE_N_KEYS_DIST_LOG )
+    << "skv_client_internal_t: Created RetrieveN request:"
+    << " KeyDataAddr: " << (uint64_t)aCursorHdl->mCachedKeys
+    << EndLogLine;
 
 
   /******************************************************
@@ -295,6 +312,7 @@ RetrieveNKeys( skv_client_cursor_handle_t  aCursorHdl,
 
   BegLogLine( SKV_CLIENT_RETRIEVE_N_KEYS_DIST_LOG )
     << "skv_client_internal_t::RetrieveNKeys():: Leaving..."
+    << " status: " << skv_status_to_string( status )
     << EndLogLine;
 
   return status;
@@ -446,7 +464,7 @@ OpenCursor( skv_pds_id_t*                aPDSId,
     << EndLogLine;
 
   mCursorManagerIF.InitCursorHdl( mPZ_Hdl, 
-                                  0, 
+                                  0,
                                   aPDSId, 
                                   aCursorHdl );
 
@@ -601,7 +619,14 @@ GetNextElement( skv_client_cursor_handle_t  aCursorHdl,
         // Done with the previous node, continue on the next one.
         int LastNodeId = aCursorHdl->GetNodeId();
         NewNodeId = LastNodeId + 1;
+
         aCursorHdl->SetNodeId( NewNodeId );
+
+        BegLogLine( SKV_CLIENT_CURSOR_LOG )
+          << "skv_client_internal_t::GetNextElement(): Fetching first element from "
+          << " new node: " << aCursorHdl->GetNodeId()
+          << " aCursorHdl->mCurrentNodeId: " << aCursorHdl->mCurrentNodeId
+          << EndLogLine;
 
         status = GetFirstLocalElement( aCursorHdl,
                                        aRetrievedKeyBuffer,

@@ -1,21 +1,36 @@
 /************************************************
- * Copyright (c) IBM Corp. 2013-2014
+ * Copyright (c) IBM Corp. 2014
  * All rights reserved. This program and the accompanying materials
  * are made available under the terms of the Eclipse Public License v1.0
  * which accompanies this distribution, and is available at
  * http://www.eclipse.org/legal/epl-v10.html
- *
+ *************************************************/
+
+/*
  * Contributors:
  *     lschneid - initial implementation
  *
  *  Created on: Jan 21, 2014
- *************************************************/
+ */
 
-#ifndef SKV_LOCAL_KV_LEVELDB_HPP_
-#define SKV_LOCAL_KV_LEVELDB_HPP_
+#ifndef SKV_LOCAL_KV_ROCKSDB_HPP_
+#define SKV_LOCAL_KV_ROCKSDB_HPP_
 
-class skv_local_kv_leveldb {
+#define SKV_LOCAL_KV_MAX_OUTSTANDING_REQUESTS ( 16 )
+#define SKV_LOCAL_KV_MAX_VALUE_SIZE ( 128 * 1048576ul )
+#define SKV_LOCAL_KV_RDMA_BUFFER_SIZE ( size_t(SKV_LOCAL_KV_MAX_VALUE_SIZE * SKV_LOCAL_KV_MAX_OUTSTANDING_REQUESTS) )
+
+#include <thread>
+
+class skv_local_kv_rocksdb {
   int mMyRank;
+
+  skv_local_kv_event_queue_t mEventQueue;
+  skv_local_kv_request_queue_t mRequestQueue;
+  skv_local_kv_rdma_data_buffer_t mDataBuffer;
+
+  volatile bool mKeepProcessing;
+  std::thread *mReqProcessor;
 
 public:
   skv_status_t Init( int aRank,
@@ -26,11 +41,16 @@ public:
 
   skv_status_t Exit();
 
-  skv_local_kv_event_t* GetEvent();
+  skv_local_kv_event_t* GetEvent()
+  {
+    return mEventQueue.GetEvent();
+  }
+  skv_status_t AckEvent( skv_local_kv_event_t *aEvent )
+  {
+    return mEventQueue.AckEvent( aEvent );
+  }
 
   skv_status_t CancelContext( skv_local_kv_req_ctx_t *aReqCtx );
-
-  skv_status_t AckEvent( skv_local_kv_event_t *aEvent );
 
   skv_status_t GetDistribution( skv_distribution_t**,
                                 skv_local_kv_cookie_t * );
@@ -121,8 +141,28 @@ public:
 
   skv_status_t DumpImage( char* aCheckpointPath );
 
+  /* NON-BACK-END API functions */
+  bool KeepProcessing()
+  {
+    return mKeepProcessing;
+  }
+  skv_local_kv_request_queue_t* GetRequestQueue()
+  {
+    return &mRequestQueue;
+  }
+
+  skv_status_t PerformOpen( skv_local_kv_request_t *aReq );
+  skv_status_t PerformGetDistribution(skv_local_kv_request_t *aReq );
+  skv_status_t PerformStat( skv_local_kv_request_t *aReq );
+  skv_status_t PerformClose( skv_local_kv_request_t *aReq );
+  skv_status_t PerformInsert( skv_local_kv_request_t *aReq );
+  skv_status_t PerformLookup( skv_local_kv_request_t *aReq );
+  skv_status_t PerformRetrieve( skv_local_kv_request_t *aReq );
+  skv_status_t PerformBulkInsert( skv_local_kv_request_t *aReq );
+  skv_status_t PerformRemove( skv_local_kv_request_t *aReq );
+  skv_status_t PerformRetrieveNKeys( skv_local_kv_request_t *aReq );
 };
 
 
 
-#endif /* SKV_LOCAL_KV_LEVELDB_HPP_ */
+#endif /* SKV_LOCAL_KV_ROCKSDB_HPP_ */

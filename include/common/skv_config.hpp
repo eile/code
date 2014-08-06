@@ -1,13 +1,15 @@
 /************************************************
- * Copyright (c) IBM Corp. 2011-2014
+ * Copyright (c) IBM Corp. 2014
  * All rights reserved. This program and the accompanying materials
  * are made available under the terms of the Eclipse Public License v1.0
  * which accompanies this distribution, and is available at
  * http://www.eclipse.org/legal/epl-v10.html
- * 
+ *************************************************/
+
+/*
  * Contributors:
  *     lschneid - initial implementation
- *************************************************/
+ */
 
 #ifndef __SKV_CONFIG_HPP__
 #define __SKV_CONFIG_HPP__
@@ -46,7 +48,7 @@ class skv_configuration_t
 {
   static skv_configuration_t *mConfiguration;
 
-  int       mServerPort;
+  uint32_t  mServerPort;   // stored in host byte order
   string    mReadyFile;
   string    mMachineFile;
   string    mPersistentFilename;
@@ -71,8 +73,9 @@ public:
   const char* GetServerPersistentFilename();
   const char* GetServerPersistentFileLocalPath();
 
-  int GetSKVServerPort();
-  void SetSKVServerPort( int aServerPort );
+  uint32_t GetSKVServerPort();
+  // input in network byte order
+  void SetSKVServerPort( uint32_t aServerPort );
 
   const char* GetServerLocalInfoFile();
   const char* GetCommIF();

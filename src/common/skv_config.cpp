@@ -1,17 +1,20 @@
 /************************************************
- * Copyright (c) IBM Corp. 2007-2014
+ * Copyright (c) IBM Corp. 2014
  * All rights reserved. This program and the accompanying materials
  * are made available under the terms of the Eclipse Public License v1.0
  * which accompanies this distribution, and is available at
  * http://www.eclipse.org/legal/epl-v10.html
- * 
+ *************************************************/
+
+/*
  * Contributors:
  *     lschneid - initial implementation
- *************************************************/
+ */
 
 #include <cstdlib>
 #include <iostream>
 #include <fstream>
+#include <arpa/inet.h>
 
 #include <FxLogger.hpp>
 
@@ -58,7 +61,8 @@ skv_configuration_t::GetConfigurationFile( const char *aConfigFile )
 
   ifstream cFileStream;
   // check if user provided a file
-  if( (aConfigFile != NULL) && (strnlen( aConfigFile, 10 ) > 0) )   // if there are more than 10 letters in file name, we don't care
+  // safe string length check: if there are more than N letters in the file name, we're fine
+  if( (aConfigFile != NULL) && (strnlen( aConfigFile, 16 ) > 0) )
   {
     BegLogLine( SKV_CONFIG_FILE_LOG )
       << "skv_configuration_t::GetConfigurationFile()::"
@@ -66,30 +70,22 @@ skv_configuration_t::GetConfigurationFile( const char *aConfigFile )
       << EndLogLine;
 
     // check if provided file is there
-    cFileStream.exceptions( ifstream::failbit | ifstream::badbit );
-    try
-    {
-      cFileStream.open( aConfigFile, ifstream::in );
-    }
-    catch( ifstream::failure e )
-    {
-      BegLogLine( SKV_CONFIG_FILE_LOG )
-        << "skv_configuration_t::GetConfigurationFile():: failed to open user file: " << aConfigFile
-        << EndLogLine;
-    }
+    cFileStream.open( aConfigFile, ifstream::in );
 
     if( cFileStream.good() )
     {
       cFileStream.close();
       mConfigFile = string( aConfigFile );
 
-      BegLogLine( SKV_CONFIG_FILE_LOG )
-        << "skv_configuration_t::GetConfigurationFile()::"
-        << " user provided file found:" << mConfigFile.c_str()
-        << EndLogLine;
-
       return 0;
     }
+    else
+    {
+      BegLogLine( SKV_CONFIG_FILE_LOG )
+        << "skv_configuration_t::GetConfigurationFile():: user-provided config file not found: " << aConfigFile
+        << EndLogLine;
+    }
+
   }
           
   // check for home-dir default file ~/.skv.conf
@@ -102,30 +98,19 @@ skv_configuration_t::GetConfigurationFile( const char *aConfigFile )
     << EndLogLine;
 
   // check if file is there
-  cFileStream.exceptions( ifstream::failbit | ifstream::badbit );
-  try
-  {
-    cFileStream.open( tmpCfg.c_str(), ifstream::in );
-  }
-  catch( ifstream::failure e )
-  {
-    BegLogLine( SKV_CONFIG_FILE_LOG )
-      << "skv_configuration_t::GetConfigurationFile():: failed to open user file: " << tmpCfg.c_str()
-      << EndLogLine;
-  }
+  cFileStream.open( tmpCfg.c_str(), ifstream::in );
 
   if( cFileStream.good() )
   {
     cFileStream.close();
     mConfigFile = tmpCfg;
 
-    BegLogLine( SKV_CONFIG_FILE_LOG )
-      << "skv_configuration_t::GetConfigurationFile()::"
-      << " user default file found: " << mConfigFile.c_str()
-      << EndLogLine;
-
     return 0;
   }
+  else
+    BegLogLine( SKV_CONFIG_FILE_LOG )
+        << "skv_configuration_t::GetConfigurationFile():: no server conf in home dir: " << tmpCfg.c_str()
+        << EndLogLine;
 
   BegLogLine( SKV_CONFIG_FILE_LOG )
     << "skv_configuration_t::GetConfigurationFile()::"
@@ -188,7 +173,7 @@ skv_configuration_t::ReadConfigurationFile( const char *aConfigFile )
         switch( GetVariableCase( cline, &valueIndex ) )
         {
           case SKV_CONFIG_SETTING_SERVER_PORT:
-            mServerPort = atoi( cline.substr( valueIndex ).c_str() );
+            SetSKVServerPort( (uint16_t)atoi( cline.substr( valueIndex ).c_str() ) );
             break;
 
           case SKV_CONFIG_SETTING_READY_FILE:
@@ -331,14 +316,14 @@ skv_configuration_t::GetSKVConfiguration( const char *aConfigFile )
   return mConfiguration;
 }
 
-int
+uint32_t
 skv_configuration_t::GetSKVServerPort()
 {
   return mServerPort;
 }
 
 void
-skv_configuration_t::SetSKVServerPort( int aServerPort )
+skv_configuration_t::SetSKVServerPort( uint32_t aServerPort )
 {
   mServerPort = aServerPort;
 }
@@ -388,7 +373,7 @@ IsComment( string s )
 
   line_status = SKV_CONFIG_FILE_EMPTY_LINE;
 
-  for( int i = 0; i < s.size() && (line_status == SKV_CONFIG_FILE_EMPTY_LINE); i++ )
+  for( unsigned int i = 0; i < s.size() && (line_status == SKV_CONFIG_FILE_EMPTY_LINE); i++ )
   {
     switch( s[i] )
     {

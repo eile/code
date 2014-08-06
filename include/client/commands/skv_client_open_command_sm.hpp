@@ -1,13 +1,15 @@
 /************************************************
- * Copyright (c) IBM Corp. 2007-2014
+ * Copyright (c) IBM Corp. 2014
  * All rights reserved. This program and the accompanying materials
  * are made available under the terms of the Eclipse Public License v1.0
  * which accompanies this distribution, and is available at
  * http://www.eclipse.org/legal/epl-v10.html
- * 
+ *************************************************/
+
+/*
  * Contributors:
  *     arayshu, lschneid - initial implementation
- *************************************************/
+ */
 
 #ifndef __SKV_CLIENT_OPEN_COMMAND_SM_HPP__
 #define __SKV_CLIENT_OPEN_COMMAND_SM_HPP__
@@ -26,6 +28,7 @@ public:
 
     skv_client_command_state_t State = aCCB->GetState();    
     skv_client_event_t         Event = Hdr->mEvent;
+    skv_status_t status = SKV_SUCCESS;
 
     switch( State )
       {
@@ -58,6 +61,7 @@ public:
                 aCCB->mCCBMgrIF->AddToDoneCCBQueue( aCCB );
 
                 aCCB->Transit( SKV_CLIENT_COMMAND_STATE_DONE );
+                status = SKV_SUCCESS;
                 break;
               }	    
             default:
@@ -84,6 +88,7 @@ public:
           break;
         }
       }
+    return status;
   }
 };
 

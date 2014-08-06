@@ -1,13 +1,15 @@
 /************************************************
- * Copyright (c) IBM Corp. 2007-2014
+ * Copyright (c) IBM Corp. 2014
  * All rights reserved. This program and the accompanying materials
  * are made available under the terms of the Eclipse Public License v1.0
  * which accompanies this distribution, and is available at
  * http://www.eclipse.org/legal/epl-v10.html
- * 
+ *************************************************/
+
+/*
  * Contributors:
  *     arayshu, lschneid - initial implementation
- *************************************************/
+ */
 
 #ifndef __SKV_CLIENT_HPP__
 #define __SKV_CLIENT_HPP__
@@ -30,11 +32,13 @@ public:
    */
 #ifdef SKV_CLIENT_UNI
   skv_status_t Init( skv_client_group_id_t aCommGroupId,
-      int aFlags );
+      int aFlags,
+      const char* aConfigFile = NULL );
 #else
   skv_status_t Init( skv_client_group_id_t aCommGroupId,
                      MPI_Comm aComm,
-                     int aFlags );
+                     int aFlags,
+                     const char* aConfigFile = NULL );
   #endif
 
   /**
@@ -42,7 +46,8 @@ public:
    */
   skv_status_t Finalize();
 
-  skv_status_t Connect( const char* aServerGroupName, int aFlags );
+  /* optional config file name or NULL to point to the skv_server.conf file or equivalent */
+  skv_status_t Connect( const char* aConfigFile, int aFlags );
   skv_status_t Disconnect();
 
   /***

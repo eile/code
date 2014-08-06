@@ -4,11 +4,13 @@
  * are made available under the terms of the Eclipse Public License v1.0
  * which accompanies this distribution, and is available at
  * http://www.eclipse.org/legal/epl-v10.html
- *
+ *************************************************/
+
+/*
  * Contributors:
  *     lschneid - initial implementation
  * Created on: Feb 1, 2014
- *************************************************/
+ */
 
 #ifndef SKV_CLIENT_UNI
 #define SKV_CLIENT_UNI
@@ -37,8 +39,9 @@ enum skv_test_mode_t
 
 typedef struct
 {
-  std::string SERVER_ADDR;
+  std::string CONF_FILE;
   short TEST_MODE;
+  uint16_t KEYSIZE;
 } skv_test_config_t;
 
 typedef struct
@@ -47,8 +50,9 @@ typedef struct
 } skv_global_state_t;
 
 static skv_test_config_t config = {
-    "",
-    SKV_BASE_TEST_ALL
+    "skv_server.conf",
+    SKV_BASE_TEST_ALL,
+    4
 };
 
 static skv_global_state_t gdata;
@@ -100,7 +104,7 @@ int Init_test( int argc, char **argv )
 {
   int status = 0;
   int op;
-  while( (op = getopt( argc, argv, "ha:m:" )) != -1 )
+  while( (op = getopt( argc, argv, "ha:k:m:" )) != -1 )
   {
     char *endp;
     switch( op )
@@ -111,8 +115,9 @@ int Init_test( int argc, char **argv )
       {
         std::cout << "USAGE: random_read \n";
         std::cout << "  Arguments:\n";
-        std::cout << "  -a <server_addr>   : address of server (default 127.0.0.1/localhost)\n";
+        std::cout << "  -f <config_file>   : skv config file (default ./skv_server.conf)\n";
         std::cout << "  -h                 : print this help\n";
+        std::cout << "  -k <keysize>       : keysize for testing (default: 4)\n";
         std::cout << "  -m <test_mode>     : Testmode: [a]|[bcdipr]\n";
         std::cout << "                     :     a-all; b-bulkinsert, c-cursor, d-remove\n";
         std::cout << "                     :     i-insert, p-PDS, r-retrieve\n";
@@ -120,7 +125,10 @@ int Init_test( int argc, char **argv )
         return 1;
       }
       case 'a':
-        config.SERVER_ADDR.assign( optarg );
+        config.CONF_FILE.assign( optarg );
+        break;
+      case 'k':
+        config.KEYSIZE = atoi( optarg );
         break;
       case 'm':
         config.TEST_MODE = 0;
@@ -193,23 +201,22 @@ skv_status_t Init_skv()
    ****************************************************************************/
   BegLogLine( 1 )
     << "skv_base_test::Init_skv():: About to connect "
-    << " ServerAddress: " << config.SERVER_ADDR.c_str()
+    << " ConfigFile: " << config.CONF_FILE.c_str()
     << EndLogLine;
 
-  status = gdata.Client.Connect( config.SERVER_ADDR.data(), 0 );
+  status = gdata.Client.Connect( config.CONF_FILE.data(), 0 );
 
   if( status == SKV_SUCCESS )
     {
       BegLogLine( 1 )
-        << "skv_base_test::Init_skv():: SKV Client connected to "
-        << " server at { " << config.SERVER_ADDR.c_str() << " }"
+        << "skv_base_test::Init_skv():: SKV Client connected "
         << EndLogLine;
     }
   else
     {
       BegLogLine( 1 )
         << "skv_base_test::Init_skv():: SKV Client FAILED to connect "
-        << " server at { " << config.SERVER_ADDR.c_str() << " }"
+        << " config file: " << config.CONF_FILE.c_str()
         << " status: " << skv_status_to_string( status )
         << EndLogLine;
     }
@@ -399,12 +406,13 @@ int Test_Remove( )
 }
 
 static inline
-int Test_BulkInsert( int aRND_SEED, int aMaxSize, int aCount )
+int Test_BulkInsert( int aRND_SEED, int aKeySize, int aMaxSize, int aCount )
 {
   int status = 0;
 
   status += TEST_RESULT( skv_base_test_bulkinsert( "SKV_BASE_TEST_PDS",
                                                    aCount,
+                                                   aKeySize,
                                                    aMaxSize,
                                                    aRND_SEED ),
                          SKV_SUCCESS,
@@ -414,12 +422,13 @@ int Test_BulkInsert( int aRND_SEED, int aMaxSize, int aCount )
 }
 
 static inline
-int Test_Cursor( int aRND_SEED, int aMaxSize, int aCount )
+int Test_Cursor( int aRND_SEED, int aKeySize, int aMaxSize, int aCount )
 {
   int status = 0;
 
   status += TEST_RESULT( skv_base_test_bulkinsert( "SKV_BULK_TEST_PDS",
                                                    aCount,
+                                                   aKeySize,
                                                    aMaxSize,
                                                    aRND_SEED ),
                          SKV_SUCCESS,
@@ -427,6 +436,7 @@ int Test_Cursor( int aRND_SEED, int aMaxSize, int aCount )
 
   status += TEST_RESULT( skv_base_test_cursor( "SKV_BULK_TEST_PDS",
                                                aCount,
+                                               aKeySize,
                                                aMaxSize,
                                                aRND_SEED,
                                                true ),
@@ -435,6 +445,7 @@ int Test_Cursor( int aRND_SEED, int aMaxSize, int aCount )
 
   status += TEST_RESULT( skv_base_test_cursor( "SKV_BULK_TEST_PDS",
                                                aCount,
+                                               aKeySize,
                                                aMaxSize,
                                                aRND_SEED,
                                                false ),
@@ -489,12 +500,12 @@ main(int argc, char **argv)
 
   if( config.TEST_MODE & (SKV_BASE_TEST_BULKINSERT) )
   {
-    rc += Test_BulkInsert( 246, 8192, 100 );
+    rc += Test_BulkInsert( 246, config.KEYSIZE, 8192, 1000 );
   }
 
   if( config.TEST_MODE & (SKV_BASE_TEST_CURSOR) )
   {
-    rc += Test_Cursor( 246, 8192, 1000 );
+    rc += Test_Cursor( 246, config.KEYSIZE, 8192, 1000 );
   }
 
   // cleanup, disconnect, shutdown

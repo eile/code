@@ -1,13 +1,15 @@
 /************************************************
- * Copyright (c) IBM Corp. 2010-2014
+ * Copyright (c) IBM Corp. 2014
  * All rights reserved. This program and the accompanying materials
  * are made available under the terms of the Eclipse Public License v1.0
  * which accompanies this distribution, and is available at
  * http://www.eclipse.org/legal/epl-v10.html
- *
+ *************************************************/
+
+/*
  * Contributors:
  *     lschneid - initial implementation
- *************************************************/
+ */
 
 #include <time.h>
 #include <mpi.h>
@@ -112,7 +114,7 @@ main(int argc, char **argv)
     exit(1);
     }
     
-  char* ServerAddress = argv[ 1 ];  
+  char* ConfigFile = argv[ 1 ];
 
   int Rank = 0;
   int NodeCount = 1;
@@ -121,10 +123,12 @@ main(int argc, char **argv)
   /*****************************************************************************
    * Init MPI
    ****************************************************************************/ 
+#ifndef SKV_CLIENT_UNI
   MPI_Init( &argc, &argv );
   MPI_Comm_rank( MPI_COMM_WORLD, &Rank );
   MPI_Comm_size( MPI_COMM_WORLD, &NodeCount );
   printf(" %d: MPI_Init complete\n", Rank);
+#endif
   /****************************************************************************/ 
 
 
@@ -132,11 +136,12 @@ main(int argc, char **argv)
   /*****************************************************************************
    * Init the SKV Client
    ****************************************************************************/ 
-  skv_status_t status = SKV_Init( 0,
+  skv_status_t status = SKV_Init( Rank,
 #ifndef SKV_CLIENT_UNI
                                     MPI_COMM_WORLD,
 #endif
-                                    Rank,
+                                    0,
+                                    ConfigFile,
                                     &Client );
 
   if( status == SKV_SUCCESS )
@@ -156,7 +161,7 @@ main(int argc, char **argv)
    ****************************************************************************/ 
   BegLogLine( SKV_TEST_LOG, "skv_test_n_inserts_retrieves::main():: About to connect ");
 
-  status = SKV_Connect( Client, ServerAddress, 0 );
+  status = SKV_Connect( Client, ConfigFile, 0 );
 
   if( status == SKV_SUCCESS )
     {
@@ -229,7 +234,9 @@ main(int argc, char **argv)
   int  DataSizeCount = 0;
   getDataSizes( & DataSizes, & DataSizeCount, 0, MAX_TEST_SIZE_EXP );
 
+#ifndef SKV_CLIENT_UNI
   MPI_Barrier( MPI_COMM_WORLD );
+#endif
 
   uint64_t NUMBER_OF_TRIES = 0;
   uint64_t NUMBER_OF_SNODES = SKVTestGetServerCount();
@@ -370,8 +377,9 @@ main(int argc, char **argv)
           // int Key = ( Rank * DataSizeCount * NUMBER_OF_TRIES) 
           //   + (sizeIndex * NUMBER_OF_TRIES ) 
           //   + t;
-
+#ifndef DO_CHECK
           int RetrivedSize = 0;
+#endif
           status = SKV_Iretrieve( Client, &MyPDSId,
                                    (char *) &Key,
                                    (int) sizeof( int ),
@@ -532,7 +540,7 @@ main(int argc, char **argv)
       double InsertBandwidth   = ( testDataSize / ( GlobalInsertAvgTime * 1024.0 * 1024.0 ) );
       double RetrieveBandwidth = ( testDataSize / ( GlobalRetrieveAvgTime * 1024.0 * 1024.0 ) );
 
-      printf("%s %d %s %d %s %d %s %d %s %d %s %d %s %d %s %d\n",
+      printf("%s %2.0lf %s %d %s %ld %s %lf %s %lf %s %lf %s %lf %s %lf\n",
              "skv_test_n_inserts_retrieves::main():: TIMING: log2(ValueSize): ", log2( (double) testDataSize ),
              " ValueSize: ",               testDataSize,
              " TryCount: ",                NUMBER_OF_TRIES,
@@ -554,13 +562,17 @@ main(int argc, char **argv)
 #endif
         }
 
+#ifndef SKV_CLIENT_UNI
       MPI_Barrier( MPI_COMM_WORLD );
+#endif
     }
 
   SKV_Disconnect( Client );
   SKV_Finalize( Client );
 
+#ifndef SKV_CLIENT_UNI
   MPI_Finalize();
+#endif
 
   return 0;
 }

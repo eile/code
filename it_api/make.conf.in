@@ -1,13 +1,16 @@
 ########################################
-# Copyright (c) IBM Corp. 2007-2014
+# Copyright (c) IBM Corp. 2014
 # All rights reserved. This program and the accompanying materials
 # are made available under the terms of the Eclipse Public License v1.0
 # which accompanies this distribution, and is available at
 # http://www.eclipse.org/legal/epl-v10.html
+########################################
 #
 # Contributors:
 #     arayshu, lschneid - initial implementation
-########################################
+
+
+include ${ITAPE_TOP}/make.conf_${SKV_CONF}
 
 # which parts of the src to build:
 #  src     - sources
@@ -68,23 +71,25 @@ else
 # enable SIW workaround for ... 
 IT_API_CONFIG+=-DIT_API_USE_SIW_HACK
 
-endif
+# enable RoQ SGE workaround
+#IT_API_CONFIG+=-DROQ_SGE_WORKAROUND
 
+endif
 
 
 ##################################################
 # global it api flags for all components of it api
-IT_API_GLOBAL_CXXFLAGS=${IT_API_CONFIG} -I${TOP}/FxLogger/Pk -I${TOP}/FxLogger
-IT_API_GLOBAL_CFLAGS=${IT_API_CONFIG} -I${TOP}/FxLogger/Pk -I${TOP}/FxLogger
-IT_API_GLOBAL_LDFLAGS=${IT_API_CONFIG} ${TOP}/FxLogger/libPkLinux.a
-
-
+IT_API_GLOBAL_CXXFLAGS=${IT_API_CONFIG} -I${FXLOGGER_DIR}/Pk -I${FXLOGGER_DIR}
+IT_API_GLOBAL_CFLAGS=${IT_API_CONFIG} -I${FXLOGGER_DIR}/Pk -I${FXLOGGER_DIR}
+IT_API_GLOBAL_LDFLAGS=${IT_API_CONFIG} ${FXLOGGER_DIR}/libPkLinux.a
 
 # set the base directory for IT_API src
-IT_API_BASE=${TOP}/it_api
-
-# central build dir for it_api
-IT_API_BUILD_DIR=${IT_API_BASE}/build
+IT_API_BASE=${ITAPE_TOP}
 
 # main include dir for it_api
 IT_API_INCLUDE_DIR=${IT_API_BASE}/include
+
+# use skv/build as a central build dir for all skv components
+BUILD_DIR=$(ITAPE_TOP)/../build
+
+AR=ar

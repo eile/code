@@ -1,13 +1,15 @@
 /************************************************
- * Copyright (c) IBM Corp. 2007-2014
+ * Copyright (c) IBM Corp. 2014
  * All rights reserved. This program and the accompanying materials
  * are made available under the terms of the Eclipse Public License v1.0
  * which accompanies this distribution, and is available at
  * http://www.eclipse.org/legal/epl-v10.html
- *
+ *************************************************/
+
+/*
  * Contributors:
  *     arayshu, lschneid - initial implementation
- *************************************************/
+ */
 
 #ifndef __SKV_H__
 #define __SKV_H__
@@ -67,7 +69,7 @@ extern "C"
      * SKV_COMMAND_RIU_UPDATE
      * SKV_COMMAND_RIU_APPEND
      * because they define different insert cases (i.e. represent different types of insert command)
-     *** /
+     ***/
 
     /***
      * If this flag is specified, the insert 
@@ -191,16 +193,18 @@ extern "C"
 #if defined( SKV_NON_MPI ) || defined ( SKV_CLIENT_UNI )
 
   skv_status_t
-  SKV_Init( skv_client_group_id_t  aCommGroupId,  
-             int                     aFlags,
-             skv_hdl_t             *aClient );
+  SKV_Init( skv_client_group_id_t aCommGroupId,
+            int aFlags,
+            const char* aConfigFile,
+            skv_hdl_t *aClient );
 #else
 
   skv_status_t
-  SKV_Init( skv_client_group_id_t  aCommGroupId,  
-             MPI_Comm                aComm,
-             int                     aFlags,
-             skv_hdl_t             *aClient );
+  SKV_Init( skv_client_group_id_t aCommGroupId,
+             MPI_Comm aComm,
+             int aFlags,
+             const char* aConfigFile,
+             skv_hdl_t *aClient );
 #endif
 
 
@@ -212,7 +216,7 @@ extern "C"
 
   skv_status_t
   SKV_Connect( skv_hdl_t  aClient,
-                const char *aServerGroupName,
+                const char *aServerGroupFile,
                 int         aFlags );
 
   skv_status_t

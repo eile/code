@@ -1,13 +1,15 @@
 /************************************************
- * Copyright (c) IBM Corp. 2007-2014
+ * Copyright (c) IBM Corp. 2014
  * All rights reserved. This program and the accompanying materials
  * are made available under the terms of the Eclipse Public License v1.0
  * which accompanies this distribution, and is available at
  * http://www.eclipse.org/legal/epl-v10.html
- * 
+ *************************************************/
+
+/*
  * Contributors:
  *     arayshu, lschneid - initial implementation
- *************************************************/
+ */
 
 #include <common/skv_types.hpp>
 #include <common/skv_client_server_headers.hpp>
@@ -20,7 +22,6 @@
 #include <server/skv_server_event_source.hpp>
 
 // include the implementations of the local kv backend
-#include <server/skv_local_kv_types.hpp>
 #include <server/skv_local_kv_interface.hpp>
 
 #include <server/skv_server.hpp>
@@ -39,6 +40,7 @@ main(int argc, char **argv)
    ***********************************************************/
   MPI_Init( &argc, &argv );
 
+  int rc = 0;
   int Rank;
   int NodeCount;
   MPI_Comm_rank( MPI_COMM_WORLD, &Rank );
@@ -47,14 +49,44 @@ main(int argc, char **argv)
 
   FxLogger_Init( argv[ 0 ], Rank );
 
+  int op;
+  std::string SKV_CONFIG_FILE_ARG;
+
+  while( (op = getopt( argc, argv, "hc:C" )) != -1 )
+  {
+    char *endp;
+    switch( op )
+    {
+      default:
+        rc = EINVAL;
+      case 'h':
+      {
+        std::cout << "USAGE: " << argv[ 0 ] << std::endl;
+        std::cout << "  Arguments:\n";
+        std::cout << "  -c <config>   : path and name of config file (default: search /etc/skv_server.conf and ~/.skv_server.conf)\n";
+        std::cout << "  -C            : startup from checkpoint - load existing data from a file (not yet implemented)\n";
+        std::cout << "  -h            : print this help\n";
+        std::cout << "  " << std::endl;
+        return rc;
+      }
+      case 'c':
+        SKV_CONFIG_FILE_ARG.assign( optarg );
+        break;
+      case 'C':
+        std::cout << " Checkpoint restart coming soon..." << std::endl;
+        return ENOSYS;
+    }
+
+  }
+
   pkTraceServer::Init();
 
-  skv_configuration_t *config = skv_configuration_t::GetSKVConfiguration();
+  skv_configuration_t *config = skv_configuration_t::GetSKVConfiguration( SKV_CONFIG_FILE_ARG.c_str() );
 
   // Clear the skv server ready file
   if( Rank == 0 )
   {
-    int rc = unlink( config->GetServerReadyFile() );
+    rc = unlink( config->GetServerReadyFile() );
 
     BegLogLine( rc == 0 )
       << "skv_server_main::main():: Cleared skv server ready file: "
@@ -88,7 +120,7 @@ main(int argc, char **argv)
 
   if( Rank == 0 )
   {
-    int rc = open( config->GetServerReadyFile(),
+    rc = open( config->GetServerReadyFile(),
     O_CREAT | O_TRUNC | O_RDWR,
                    S_IROTH | S_IWOTH );
 
@@ -106,5 +138,5 @@ main(int argc, char **argv)
 
   Server.Run();
 
-  return 0;
+  return rc;
 };

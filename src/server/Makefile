@@ -1,25 +1,23 @@
 ########################################
-#Copyright (c) IBM Corp. 2007-2014
+#Copyright (c) IBM Corp. 2014
 #All rights reserved. This program and the accompanying materials
 #are made available under the terms of the Eclipse Public License v1.0
 #which accompanies this distribution, and is available at
 #http://www.eclipse.org/legal/epl-v10.html
+########################################
+#skv top level makefile to BUILD AND INSTALL server components
 #
 #Contributors:
 #    arayshu, lschneid - initial implementation
-########################################
-#skv top level makefile to BUILD AND INSTALL server components
 
-ifndef TOP
-    TOP = $(shell while ! test -e make.conf.in; do cd ..; done; pwd)
-    export TOP
+ifndef SKV_TOP
+    SKV_TOP=$(shell while ! test -e make.conf.in; do cd ..; done; pwd)
+    export SKV_TOP
 endif
-
 
 # picks up SKV-specific settings
 # e.g.: SKV_DEST, SKV_BASE_DIR, SKV_BUILD_DIR, SKV_GLOBAL_*FLAGS, ...
-include ${TOP}/make.conf
-
+include ${SKV_TOP}/make.conf
 
 
 SRC_CPP= \
@@ -36,7 +34,7 @@ SRC_CPP= \
 
 
 MAIN_TARGET=SKVServer
-SKV_CXXFLAGS=-O2 -g ${ASF_GLOBAL_CXXFLAGS} -I${SKV_INCLUDE_DIR} ${SKV_GLOBAL_CXXFLAGS}
+SKV_CXXFLAGS=-O2 -g -I${SKV_INCLUDE_DIR} ${SKV_GLOBAL_CXXFLAGS}
 
 
 OBJ=$(SRC_CPP:%.cpp=${SKV_BUILD_DIR}/%.o)
@@ -96,3 +94,5 @@ ${SKV_BUILD_DIR}/%.d: %.cpp
 
 
 -include ${DEP}
+
+

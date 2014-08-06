@@ -1,14 +1,14 @@
 #!/bin/sh
 ########################################
-# Copyright (c) IBM Corp. 2007-2014
+# Copyright (c) IBM Corp. 2014
 # All rights reserved. This program and the accompanying materials
 # are made available under the terms of the Eclipse Public License v1.0
 # which accompanies this distribution, and is available at
 # http://www.eclipse.org/legal/epl-v10.html
+########################################
 #
 # Contributors:
 #     lschneid - initial implementation
-########################################
 
 BASE_DIR=$(dirname $(readlink -f $0))
 INST_EXEC="install -D -v"
@@ -30,6 +30,8 @@ INSTALL_DIR=""
 BIN_FILE_LIST="\
  build/SKVServer \
  build/skv_base_test \
+ build/test_skv_insert_command \
+ build/test_skv_remove_command \
  build/skv_test_insert_retrieve_async \
  build/skv_test_insert_retrieve_sync \
  "
@@ -40,7 +42,7 @@ CONF_FILE_LIST="\
 
 LIB_FILE_LIST="\
  FxLogger/libPkLinux.a \
- it_api/build/libit_api_o_verbs.a \
+ build/libit_api_o_verbs.a \
  build/libskv_client.a \
  build/libskv_client_mpi.a \
  build/libskv_common.a \
@@ -122,12 +124,6 @@ skv_run_make() {
     make -C FxLogger ${MAKE_OPTION}
     if [ $? -ne 0 ]; then
         echo "FAILED: Building FxLogger"
-        return 1
-    fi
-
-    make -C it_api ${MAKE_OPTION}
-    if [ $? -ne 0 ]; then
-        echo "FAILED: Building it_api"
         return 1
     fi
 

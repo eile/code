@@ -1,13 +1,15 @@
 /************************************************
- * Copyright (c) IBM Corp. 2007-2014
+ * Copyright (c) IBM Corp. 2014
  * All rights reserved. This program and the accompanying materials
  * are made available under the terms of the Eclipse Public License v1.0
  * which accompanies this distribution, and is available at
  * http://www.eclipse.org/legal/epl-v10.html
- * 
+ *************************************************/
+
+/*
  * Contributors:
  *     arayshu, lschneid - initial implementation
- *************************************************/
+ */
 
 #ifndef __SKV_SERVER_OPEN_COMMAND_SM_HPP__
 #define __SKV_SERVER_OPEN_COMMAND_SM_HPP__
@@ -79,6 +81,7 @@ public:
            skv_server_event_t *aEvent,
            int *aSeqNo )
   {
+    skv_status_t status = SKV_ERRNO_STATE_MACHINE_ERROR;
     skv_server_ccb_t* Command = aEPState->GetCommandForOrdinal( aCommandOrdinal );
 
     skv_server_command_state_t State = Command->GetState();
@@ -95,12 +98,12 @@ public:
           << " PDSId: " << Command->mLocalKVData.mPDSOpen.mPDSId
           << EndLogLine;
 
-        skv_status_t status = open_post_response( aEPState,
-                                                  Command,
-                                                  aCommandOrdinal,
-                                                  aSeqNo,
-                                                  Command->mLocalKVrc,
-                                                  Command->mLocalKVData.mPDSOpen.mPDSId );
+        status = open_post_response( aEPState,
+                                     Command,
+                                     aCommandOrdinal,
+                                     aSeqNo,
+                                     Command->mLocalKVrc,
+                                     Command->mLocalKVData.mPDSOpen.mPDSId );
         Command->Transit( SKV_SERVER_COMMAND_STATE_INIT );
         break;
       }
@@ -126,12 +129,13 @@ public:
               << " Flags: " << (int) Flags
               << EndLogLine;
 
-            skv_local_kv_cookie_t cookie( aCommandOrdinal, aEPState );
-            skv_status_t status = aLocalKV->PDS_Open( PDSName,
-                                                      Privs,
-                                                      Flags,
-                                                      &PDSId,
-                                                      &cookie );
+            skv_local_kv_cookie_t *cookie = &Command->mLocalKVCookie;
+            cookie->Set( aCommandOrdinal, aEPState );
+            status = aLocalKV->PDS_Open( PDSName,
+                                         Privs,
+                                         Flags,
+                                         &PDSId,
+                                         cookie );
 
             BegLogLine( SKV_SERVER_OPEN_COMMAND_SM_LOG )
               << "skv_server_open_command_sm::Execute():: "
@@ -180,7 +184,7 @@ public:
       }
     }
 
-    return SKV_SUCCESS;
+    return status;
   }
 };
 

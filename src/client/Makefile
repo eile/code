@@ -1,25 +1,23 @@
 ########################################
-#Copyright (c) IBM Corp. 2007-2014
+#Copyright (c) IBM Corp. 2014
 #All rights reserved. This program and the accompanying materials
 #are made available under the terms of the Eclipse Public License v1.0
 #which accompanies this distribution, and is available at
 #http://www.eclipse.org/legal/epl-v10.html
+########################################
+#skv makefile to BUILD AND INSTALL client library
 #
 #Contributors:
 #    arayshu, lschneid - initial implementation
-########################################
-#skv makefile to BUILD AND INSTALL client library
 
-ifndef TOP
-    TOP = $(shell while ! test -e make.conf.in; do cd ..; done; pwd)
-    export TOP
+ifndef SKV_TOP
+    SKV_TOP=$(shell while ! test -e make.conf.in; do cd ..; done; pwd)
+    export SKV_TOP
 endif
-
 
 # picks up SKV-specific settings
 # e.g.: SKV_DEST, SKV_BASE_DIR, SKV_BUILD_DIR, SKV_GLOBAL_*FLAGS, ...
-include ${TOP}/make.conf
-
+include ${SKV_TOP}/make.conf
 
 
 SRC_CPP=skv_client.cpp \
@@ -41,19 +39,8 @@ MPI_OBJ=$(SRC_CPP:%.cpp=${SKV_BUILD_DIR}/mpi/%.o)
 DEP=$(SRC_CPP:%.cpp=${SKV_BUILD_DIR}/%.d)
 
 
-
-
-
-# pull in definitions for file-based client
-ifeq (${SKV_INCLUDE_FILEBASED},yes)
-include filebased.mk
-else
-
 all: build
 	echo "standard build complete"
-
-endif
-
 
 ${UNI_TARGET}: ${UNI_OBJ}
 	@${AR} r ${SKV_BUILD_DIR}/$@ $^
@@ -87,6 +74,8 @@ build: prebuild build_mpi build_uni
 
 install: build
 	@echo "${CURDIR}: Starting install now..."
+	install -D -m 644 ${SKV_BUILD_DIR}/${MPI_TARGET} ${SKV_INSTALL_DIR}/lib/${MPI_TARGET}
+	install -D -m 644 ${SKV_BUILD_DIR}/${UNI_TARGET} ${SKV_INSTALL_DIR}/lib/${UNI_TARGET}
 
 
 ${SKV_BUILD_DIR}/mpi/%.o: %.cpp
@@ -101,7 +90,7 @@ ${SKV_BUILD_DIR}/%.o: %.cpp
 
 
 .PHONY: clean distclean
-clean distclean: ${FILEBASEDCLEAN}
+clean distclean:
 	${VV}-rm ${MPI_OBJ} ${UNI_OBJ} ${DEP} ${SKV_BUILD_DIR}/${UNI_TARGET} ${SKV_BUILD_DIR}/${MPI_TARGET}
 
 

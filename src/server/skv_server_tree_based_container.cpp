@@ -1,13 +1,15 @@
 /************************************************
- * Copyright (c) IBM Corp. 2007-2014
+ * Copyright (c) IBM Corp. 2014
  * All rights reserved. This program and the accompanying materials
  * are made available under the terms of the Eclipse Public License v1.0
  * which accompanies this distribution, and is available at
  * http://www.eclipse.org/legal/epl-v10.html
- * 
+ *************************************************/
+
+/*
  * Contributors:
  *     arayshu, lschneid - initial implementation
- *************************************************/
+ */
 
 #include <client/skv_client_server_conn.hpp>
 #include <common/skv_client_server_protocol.hpp>
@@ -402,6 +404,7 @@ RetrieveNKeys( skv_pds_id_t       aPDSId,
     StartingKeyPtr = MakeKey( aPDSId, &StartingUserKey );
   }
 
+  *aRetrievedKeysCount = 0;
   skv_data_container_t::iterator iter = mDataMap->lower_bound( *StartingKeyPtr );
 
   BegLogLine( SKV_SERVER_TREE_BASED_CONTAINER_LOG )
@@ -476,10 +479,13 @@ RetrieveNKeys( skv_pds_id_t       aPDSId,
   }
 
   BegLogLine( SKV_SERVER_TREE_BASED_CONTAINER_LOG )
-    << "skv_tree_based_container_t::RetrieveNKeys():: Leaving with SKV_SUCCESS"
+    << "skv_tree_based_container_t::RetrieveNKeys():: Leaving with " << *aRetrievedKeysCount << " Keys."
     << EndLogLine;
 
-  return SKV_SUCCESS;
+  if( *aRetrievedKeysCount == 0 )
+    return SKV_ERRNO_END_OF_RECORDS;
+  else
+    return SKV_SUCCESS;
 }
 
 

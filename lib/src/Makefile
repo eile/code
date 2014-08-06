@@ -1,42 +1,40 @@
 ########################################
-#Copyright (c) IBM Corp. 2007-2014
+#Copyright (c) IBM Corp. 2014
 #All rights reserved. This program and the accompanying materials
 #are made available under the terms of the Eclipse Public License v1.0
 #which accompanies this distribution, and is available at
 #http://www.eclipse.org/legal/epl-v10.html
+########################################
+#skv makefile to BUILD AND INSTALL client library
 #
 #Contributors:
 #    arayshu, lschneid - initial implementation
-########################################
-#skv makefile to BUILD AND INSTALL client library
 
-ifndef TOP
-    TOP = $(shell while ! test -e make.conf.in; do cd ..; done; pwd)
-    export TOP
+ifndef SKV_TOP
+    SKV_TOP=$(shell while ! test -e make.conf.in; do cd ..; done; pwd)
+    export SKV_TOP
 endif
 
 # picks up SKV-specific settings
 # e.g.: SKV_DEST, SKV_BASE_DIR, SKV_BUILD_DIR, SKV_GLOBAL_*FLAGS, ...
-include ${TOP}/make.conf
+CONF_SOURCED=no
+include ${SKV_TOP}/make.conf
 
 
 SRC_CPP=skv.cpp \
 
-
 UNI_TARGET=libskvc.a
 MPI_TARGET=libskvc_mpi.a
-SKV_CXXFLAGS=-O2 -g ${ASF_GLOBAL_CXXFLAGS} -I${SKV_INCLUDE_DIR} ${SKV_GLOBAL_CXXFLAGS} -DSKV_PURE
-
+SKV_CXXFLAGS=-O2 -g -I${SKV_INCLUDE_DIR} ${SKV_GLOBAL_CXXFLAGS} -DSKV_PURE
+SKV_CFLAGS=-O2 -g -I${SKV_INCLUDE_DIR} ${SKV_GLOBAL_CFLAGS} -DSKV_PURE
 
 UNI_OBJ=$(SRC_CPP:%.cpp=${SKV_BUILD_DIR}/%.o)
 MPI_OBJ=$(SRC_CPP:%.cpp=${SKV_BUILD_DIR}/mpi/%.o)
-DEP=$(SRC_CPP:%.cpp=${SKV_BUILD_DIR}/%.d)
-
-FXLOGGER_OBJ=FxLogger.o	Trace.o dlmalloc.o
-PATHED_FXLOGGER_OBJ=$(FXLOGGER_OBJ:%.o=${TOP}/FxLogger/%.o)
+UNI_DEP=$(SRC_CPP:%.cpp=${SKV_BUILD_DIR}/%.d)
+MPI_DEP=$(SRC_CPP:%.cpp=${SKV_BUILD_DIR}/mpi/%.d)
 
 IT_API_OBJ=it_api_o_verbs.o it_api_o_verbs_thread.o
-PATHED_IT_OBJ=$(IT_API_OBJ:%.o=${TOP}/it_api/build/%.o)
+PATHED_IT_OBJ=$(IT_API_OBJ:%.o=${SKV_TOP}/build/%.o)
 
 COMMON_OBJ=skv_utils.o skv_distribution_manager.o skv_config.o
 PATHED_COMMON_OBJ=$(COMMON_OBJ:%.o=${SKV_BUILD_DIR}/%.o)
@@ -52,8 +50,8 @@ CLIENT_OBJ=skv_client.o \
 PATHED_CLIENT_OBJ=$(CLIENT_OBJ:%.o=${SKV_BUILD_DIR}/%.o)
 PATHED_CLIENT_MPI_OBJ=$(CLIENT_OBJ:%.o=${SKV_BUILD_DIR}/mpi/%.o)
 
-ALL_CLIENT_OBJ=${PATHED_FXLOGGER_OBJ} ${PATHED_IT_OBJ} ${PATHED_COMMON_OBJ} ${PATHED_CLIENT_OBJ}
-ALL_CLIENT_MPI_OBJ=${PATHED_FXLOGGER_OBJ} ${PATHED_IT_OBJ} ${PATHED_COMMON_OBJ} ${PATHED_CLIENT_MPI_OBJ}
+ALL_CLIENT_OBJ=${PATHED_IT_OBJ} ${PATHED_COMMON_OBJ} ${PATHED_CLIENT_OBJ}
+ALL_CLIENT_MPI_OBJ=${PATHED_IT_OBJ} ${PATHED_COMMON_OBJ} ${PATHED_CLIENT_MPI_OBJ}
 
 RANLIB=ranlib
 
@@ -107,11 +105,11 @@ install: build
 
 ${SKV_BUILD_DIR}/mpi/%.o: %.c
 	@echo "compiling $<"
-	${VV}$(MPICXX) -c $(SKV_CXXFLAGS) $< -o ${SKV_BUILD_DIR}/mpi/$*.o
+	${VV}$(MPICXX) -c $(SKV_CFLAGS) $< -o ${SKV_BUILD_DIR}/mpi/$*.o
 
 ${SKV_BUILD_DIR}/%.o: %.c
 	@echo "compiling $<"
-	${VV}$(MPICXX) -c $(SKV_CXXFLAGS) -DSKV_CLIENT_UNI $< -o ${SKV_BUILD_DIR}/$*.o
+	${VV}$(CXX) -c $(SKV_CFLAGS) -DSKV_CLIENT_UNI $< -o ${SKV_BUILD_DIR}/$*.o
 
 ${SKV_BUILD_DIR}/mpi/%.o: %.cpp
 	@echo "compiling $<"
@@ -119,23 +117,28 @@ ${SKV_BUILD_DIR}/mpi/%.o: %.cpp
 
 ${SKV_BUILD_DIR}/%.o: %.cpp
 	@echo "compiling $<"
-	${VV}$(MPICXX) -c $(SKV_CXXFLAGS) -DSKV_NON_MPI -DSKV_CLIENT_UNI $< -o ${SKV_BUILD_DIR}/$*.o
+	${VV}$(CXX) -c $(SKV_CXXFLAGS) -DSKV_NON_MPI -DSKV_CLIENT_UNI $< -o ${SKV_BUILD_DIR}/$*.o
 
 
 
 
 .PHONY: clean distclean
 clean distclean: ${FILEBASEDCLEAN}
-	${VV}-rm ${MPI_OBJ} ${UNI_OBJ} ${DEP} ${SKV_BUILD_DIR}/${UNI_TARGET} ${SKV_BUILD_DIR}/${MPI_TARGET}
+	${VV}-rm ${MPI_OBJ} ${UNI_OBJ} ${UNI_DEP} ${MPI_DEP} ${SKV_BUILD_DIR}/${UNI_TARGET} ${SKV_BUILD_DIR}/${MPI_TARGET}
 
 
 
 
 
 # rule to create automatic dependency list for all files
-${SKV_BUILD_DIR}/%.d: %.cpp
+${SKV_BUILD_DIR}/mpi/%.d: %.cpp
 	@$(SHELL) -ec '$(MPICXX) -MM $(SKV_CXXFLAGS) $< \
+                          | sed "s#\($*\)\.o[ :]*#${SKV_BUILD_DIR}/mpi/\1.o $@ : #g" > $@'
+
+${SKV_BUILD_DIR}/%.d: %.cpp
+	@$(SHELL) -ec '$(CXX) -MM -DSKV_CLIENT_UNI -DSKV_NON_MPI $(SKV_CXXFLAGS) $< \
                           | sed "s#\($*\)\.o[ :]*#${SKV_BUILD_DIR}/\1.o $@ : #g" > $@'
 
 
--include ${DEP}
+include ${UNI_DEP}
+include ${MPI_DEP}

@@ -1,13 +1,15 @@
 /************************************************
- * Copyright (c) IBM Corp. 2007-2014
+ * Copyright (c) IBM Corp. 2014
  * All rights reserved. This program and the accompanying materials
  * are made available under the terms of the Eclipse Public License v1.0
  * which accompanies this distribution, and is available at
  * http://www.eclipse.org/legal/epl-v10.html
- * 
+ *************************************************/
+
+/*
  * Contributors:
  *     arayshu, lschneid - initial implementation
- *************************************************/
+ */
 
 #ifndef __SKV_SERVER_CURSOR_MANAGER_IF_HPP__
 #define __SKV_SERVER_CURSOR_MANAGER_IF_HPP__
@@ -133,6 +135,7 @@ skv_server_cursor_state_to_string( skv_server_cursor_state_t aA )
         << " aA: " << aA
         << EndLogLine;
   }
+  return "SKV_SERVER_CURSOR_STATE_UNRECOGNIZED";
 } 
 
 struct skv_server_cursor_index_iterator_positions_t
@@ -312,7 +315,8 @@ public:
     Transit( SKV_SERVER_CURSOR_STATE_RUNNING );
     mInternalEventQueue = aInternalEventQueue;
 
-    int ClientGroupCount = 0;
+    // \todo: check if this can completely go
+    //    int ClientGroupCount = 0;
 
     int SizePerBufferMetadata = sizeof( skv_server_cursor_buffer_t );
     int SizePerBufferData     = SKV_SERVER_CURSOR_BUFFER_DATA_SIZE * sizeof( char );

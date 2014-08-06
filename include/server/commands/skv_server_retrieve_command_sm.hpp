@@ -1,13 +1,15 @@
 /************************************************
- * Copyright (c) IBM Corp. 2007-2014
+ * Copyright (c) IBM Corp. 2014
  * All rights reserved. This program and the accompanying materials
  * are made available under the terms of the Eclipse Public License v1.0
  * which accompanies this distribution, and is available at
  * http://www.eclipse.org/legal/epl-v10.html
- * 
+ *************************************************/
+
+/*
  * Contributors:
  *     arayshu, lschneid - initial implementation
- *************************************************/
+ */
 
 #ifndef __SKV_SERVER_RETRIEVE_COMMAND_SM_HPP__
 #define __SKV_SERVER_RETRIEVE_COMMAND_SM_HPP__
@@ -184,7 +186,8 @@ class skv_server_retrieve_command_sm
                                                  gSKVServerInsertRetrieveFromTreeStart );
 
     // Check if the key exists
-    skv_local_kv_cookie_t cookie( aCommandOrdinal, aEPState );
+    skv_local_kv_cookie_t *cookie = &aCommand->mLocalKVCookie;
+    cookie->Set( aCommandOrdinal, aEPState );
     status = aLocalKV->Retrieve( aReq->mPDSId,
                                  aKeyData,
                                  aKeySize,
@@ -193,7 +196,7 @@ class skv_server_retrieve_command_sm
                                  aReq->mFlags,
                                  aValueMemRep,
                                  aTotalSize,
-                                 &cookie );
+                                 cookie );
 
     gSKVServerInsertRetrieveFromTreeFinis.HitOE( SKV_SERVER_RETRIEVE_TRACE,
                                                  "SKVServerInsertRetrieveFromTree",

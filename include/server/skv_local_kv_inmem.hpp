@@ -1,15 +1,17 @@
 /************************************************
- * Copyright (c) IBM Corp. 2013-2014
+ * Copyright (c) IBM Corp. 2014
  * All rights reserved. This program and the accompanying materials
  * are made available under the terms of the Eclipse Public License v1.0
  * which accompanies this distribution, and is available at
  * http://www.eclipse.org/legal/epl-v10.html
- *
+ *************************************************/
+
+/*
  * Contributors:
  *     lschneid - initial implementation
  *
  * Created on: Jan 13, 2014
- *************************************************/
+ */
 
 #ifndef SKV_LOCAL_KV_INMEM_HPP_
 #define SKV_LOCAL_KV_INMEM_HPP_

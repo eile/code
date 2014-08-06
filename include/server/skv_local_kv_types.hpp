@@ -1,14 +1,15 @@
 /************************************************
- * Copyright (c) IBM Corp. 2007-2014
+ * Copyright (c) IBM Corp. 2014
  * All rights reserved. This program and the accompanying materials
  * are made available under the terms of the Eclipse Public License v1.0
  * which accompanies this distribution, and is available at
  * http://www.eclipse.org/legal/epl-v10.html
- *
- * Contributors:
- *     lschneid - initial implementation
  *************************************************/
 
+/*
+ * Contributors:
+ *     lschneid - initial implementation
+ */
 
 #ifndef SKV_LOCAL_KV_TYPES_HPP_
 #define SKV_LOCAL_KV_TYPES_HPP_
@@ -41,7 +42,13 @@ public:
     mOrd = aOrd;
     mEPState = aEPState;
   }
-
+  inline
+  void Set(unsigned short aOrd = 0,
+      skv_server_ep_state_t *aEPState = NULL)
+  {
+    mOrd = aOrd;
+    mEPState = aEPState;
+  }
   inline
   unsigned GetOrdinal()
   {

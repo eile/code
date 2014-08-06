@@ -1,19 +1,25 @@
 /************************************************
- * Copyright (c) IBM Corp. 2007-2014
+ * Copyright (c) IBM Corp. 2014
  * All rights reserved. This program and the accompanying materials
  * are made available under the terms of the Eclipse Public License v1.0
  * which accompanies this distribution, and is available at
  * http://www.eclipse.org/legal/epl-v10.html
- * 
+ *************************************************/
+
+/*
  * Contributors:
  *     arayshu, lschneid - initial implementation
- *************************************************/
+ */
 
 #ifndef __SKV_SERVER_RETRIEVE_N_KEYS_COMMAND_SM_HPP__
 #define __SKV_SERVER_RETRIEVE_N_KEYS_COMMAND_SM_HPP__
 
 #ifndef SKV_SERVER_RETRIEVE_N_KEYS_COMMAND_SM_LOG 
 #define SKV_SERVER_RETRIEVE_N_KEYS_COMMAND_SM_LOG  ( 0 | SKV_LOGGING_ALL )
+#endif
+
+#ifndef SKV_SERVER_RETRIEVE_N_KEYS_DATA_LOG
+#define SKV_SERVER_RETRIEVE_N_KEYS_DATA_LOG ( 0 )
 #endif
 
 class skv_server_retrieve_n_keys_command_sm
@@ -46,6 +52,7 @@ class skv_server_retrieve_n_keys_command_sm
   static inline
   skv_status_t retrieve_n_start( skv_server_ep_state_t *aEPState,
                                  skv_local_kv_t *aLocalKV,
+                                 skv_server_ccb_t *aCommand,
                                  int aCommandOrdinal,
                                  skv_cmd_retrieve_n_keys_req_t* aReq,
                                  int *aRetrievedKeysCount,
@@ -63,7 +70,8 @@ class skv_server_retrieve_n_keys_command_sm
       << EndLogLine;
 
     // Check if the key exists
-    skv_local_kv_cookie_t cookie( aCommandOrdinal, aEPState );
+    skv_local_kv_cookie_t *cookie = &aCommand->mLocalKVCookie;
+    cookie->Set( aCommandOrdinal, aEPState );
     skv_status_t status = aLocalKV->RetrieveNKeys( aReq->mPDSId,
                                                    aReq->mStartingKeyData,
                                                    aReq->mStartingKeySize,
@@ -72,7 +80,7 @@ class skv_server_retrieve_n_keys_command_sm
                                                    aRetrievedKeysSizesSegsCount,
                                                    aReq->mKeysDataListMaxCount,
                                                    aReq->mFlags,
-                                                   &cookie );
+                                                   cookie );
 
     BegLogLine( SKV_SERVER_RETRIEVE_N_KEYS_COMMAND_SM_LOG )
       << "skv_server_retrieve_n_keys_command_sm:: Results of local call to RetrieveNKeys: "
@@ -100,6 +108,23 @@ class skv_server_retrieve_n_keys_command_sm
     //        it_dto_flags_t dto_flags = (it_dto_flags_t) ( IT_COMPLETION_FLAG | IT_NOTIFY_FLAG );
     it_dto_flags_t dto_flags = (it_dto_flags_t) ( 0 );
 
+    BegLogLine( SKV_SERVER_RETRIEVE_N_KEYS_DATA_LOG )
+      << "skv_server_retrieve_n_keys_command_sm::post_rdma_write(): LMRs: "
+      << " " << aRetrievedKeysSizesSegs[0]
+      << " " << aRetrievedKeysSizesSegs[1]
+      << " " << aRetrievedKeysSizesSegs[2]
+      << " " << aRetrievedKeysSizesSegs[3]
+      << EndLogLine;
+
+    BegLogLine( SKV_SERVER_RETRIEVE_N_KEYS_DATA_LOG )
+      << "skv_server_retrieve_n_keys_command_sm::post_rdma_write(): first keysize: " << *(int*)(aRetrievedKeysSizesSegs[0].GetAddr())
+      << " writeTo: " << aReq->mKeysDataList
+      << " KeyData: " << HexDump( (void*)aRetrievedKeysSizesSegs[0].GetAddr(), aRetrievedKeysSizesSegs[0].GetLen() )
+      << " " << HexDump( (void*)aRetrievedKeysSizesSegs[1].GetAddr(), aRetrievedKeysSizesSegs[1].GetLen() )
+      << " " << HexDump( (void*)aRetrievedKeysSizesSegs[2].GetAddr(), aRetrievedKeysSizesSegs[2].GetLen() )
+      << " " << HexDump( (void*)aRetrievedKeysSizesSegs[3].GetAddr(), aRetrievedKeysSizesSegs[3].GetLen() )
+      << EndLogLine;
+
     // rdma_write the value
     itstatus = it_post_rdma_write( aEPState->mEPHdl,
                                    (it_lmr_triplet_t *) aRetrievedKeysSizesSegs,
@@ -122,6 +147,7 @@ class skv_server_retrieve_n_keys_command_sm
                                    skv_server_ep_state_t *aEPState,
                                    skv_server_ccb_t *aCommand,
                                    int aRetrievedKeysCount,
+                                   skv_lmr_triplet_t *aRetrievedKeysSizesSegs,
                                    skv_cmd_retrieve_n_keys_rdma_write_ack_t *aCmpl,
                                    int aCommandOrdinal,
                                    int *aSeqNo )
@@ -144,6 +170,7 @@ class skv_server_retrieve_n_keys_command_sm
       << "skv_server_retrieve_n_keys_command_sm:: "
       << " About to Dispatch(): "
       << " status: " << skv_status_to_string( aCmpl->mStatus )
+      << " mCachedKeysCount: " << aCmpl->mCachedKeysCount
       << EndLogLine;
 
     status = aEPState->Dispatch( aCommand,
@@ -154,6 +181,8 @@ class skv_server_retrieve_n_keys_command_sm
       << "skv_server_retrieve_n_keys_command_sm:: ERROR: "
       << " status: " << skv_status_to_string( status )
       << EndLogLine;
+
+    delete aRetrievedKeysSizesSegs;
 
     return status;
   }
@@ -188,10 +217,12 @@ public:
             // on aRemoteMemKeysMaxCount. Need a better place to put this.
             //
 #define SKV_CLIENT_MAX_CURSOR_KEYS_TO_CACHE_SEND_VEC ( 2 * SKV_CLIENT_MAX_CURSOR_KEYS_TO_CACHE )
-            skv_lmr_triplet_t RetrievedKeysSizesSegs[ SKV_CLIENT_MAX_CURSOR_KEYS_TO_CACHE_SEND_VEC ];
+//            skv_lmr_triplet_t RetrievedKeysSizesSegs[ SKV_CLIENT_MAX_CURSOR_KEYS_TO_CACHE_SEND_VEC ];
+            skv_lmr_triplet_t *RetrievedKeysSizesSegs = (skv_lmr_triplet_t*)new char( SKV_CLIENT_MAX_CURSOR_KEYS_TO_CACHE_SEND_VEC * sizeof(skv_lmr_triplet_t) );
 
             status = retrieve_n_start( aEPState,
                                        aLocalKV,
+                                       Command,
                                        aCommandOrdinal,
                                        (skv_cmd_retrieve_n_keys_req_t*) Command->GetSendBuff(),
                                        & RetrievedKeysCount,
@@ -201,7 +232,7 @@ public:
             switch( status )
             {
               case SKV_ERRNO_END_OF_RECORDS:
-                // skip the rdma_write only if there was no key retrieved
+                // skip the rdma_write only if there was no key retrieved, otherwise rdma the remaining keys
                 if( RetrievedKeysSizesSegsCount == 0 )
                   break;
               case SKV_SUCCESS:
@@ -226,6 +257,7 @@ public:
                                          aEPState,
                                          Command,
                                          RetrievedKeysCount,
+                                         RetrievedKeysSizesSegs,
                                          (skv_cmd_retrieve_n_keys_rdma_write_ack_t*)Command->GetSendBuff(),
                                          aCommandOrdinal,
                                          aSeqNo );
@@ -258,6 +290,7 @@ public:
                 // skip the rdma_write only if there was no key retrieved
                 if( Command->mLocalKVData.mRetrieveNKeys.mKeysCount == 0 )
                   break;
+                // no break on purpose: EOR might be signaled even if there were a few keys available?
               case SKV_SUCCESS:
                 post_rdma_write( aEPState,
                                  Command->mLocalKVData.mRetrieveNKeys.mKeysSizesSegs,
@@ -269,6 +302,7 @@ public:
                                          aEPState,
                                          Command,
                                          Command->mLocalKVData.mRetrieveNKeys.mKeysCount,
+                                         Command->mLocalKVData.mRetrieveNKeys.mKeysSizesSegs,
                                          (skv_cmd_retrieve_n_keys_rdma_write_ack_t*)Command->GetSendBuff(),
                                          aCommandOrdinal,
                                          aSeqNo );

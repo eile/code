@@ -1,13 +1,15 @@
 /************************************************
- * Copyright (c) IBM Corp. 2007-2014
+ * Copyright (c) IBM Corp. 2014
  * All rights reserved. This program and the accompanying materials
  * are made available under the terms of the Eclipse Public License v1.0
  * which accompanies this distribution, and is available at
  * http://www.eclipse.org/legal/epl-v10.html
- * 
+ *************************************************/
+
+/*
  * Contributors:
  *     arayshu, lschneid - initial implementation
- *************************************************/
+ */
 
 #ifndef __SKV_TYPES_HPP__
 #define __SKV_TYPES_HPP__
@@ -19,6 +21,7 @@ extern "C"
   //#include "ordma_debug.h"
 }
 
+#include <cstdint>
 #include <FxLogger.hpp>
 #include <Trace.hpp>
 #include <common/skv_errno.hpp>

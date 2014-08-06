@@ -1,13 +1,15 @@
 /************************************************
- * Copyright (c) IBM Corp. 2007-2014
+ * Copyright (c) IBM Corp. 2014
  * All rights reserved. This program and the accompanying materials
  * are made available under the terms of the Eclipse Public License v1.0
  * which accompanies this distribution, and is available at
  * http://www.eclipse.org/legal/epl-v10.html
- * 
+ *************************************************/
+
+/*
  * Contributors:
  *     arayshu, lschneid - initial implementation
- *************************************************/
+ */
 
 #ifndef __SKV_SERVER_INSERT_COMMAND_SM_HPP__
 #define __SKV_SERVER_INSERT_COMMAND_SM_HPP__
@@ -233,12 +235,13 @@ private:
           | SKV_COMMAND_RIU_APPEND) )
       << EndLogLine;
 
-    skv_local_kv_cookie_t cookie( aCommandOrdinal, aEPState );
+    skv_local_kv_cookie_t *cookie = &aCommand->mLocalKVCookie;
+    cookie->Set( aCommandOrdinal, aEPState );
     status = aLocalKV->Insert( aReq,
                                lookup_status,
                                aValueRepInStore,
                                &ValueRepForRdmaRead,
-                               &cookie );
+                               cookie );
     BegLogLine( SKV_SERVER_INSERT_LOG )
       << "skv_server_insert_command_sm::insert_sequence():: Insert returned: " << skv_status_to_string( status )
       << EndLogLine;
@@ -266,22 +269,26 @@ private:
                           aSeqNo,
                           aMyRank );
         aCommand->Transit( SKV_SERVER_COMMAND_STATE_WAITING_RDMA_READ_CMPL );
-
         break;
 
       case SKV_ERRNO_LOCAL_KV_EVENT:
         // insert requires multiple stages including going through async storage steps
         status = insert_create_multi_stage( aEPState, aLocalKV, aCommand, aCommandOrdinal, aReq );
         aCommand->Transit( SKV_SERVER_COMMAND_STATE_LOCAL_KV_DATA_OP );
-
         break;
 
       case SKV_ERRNO_RECORD_ALREADY_EXISTS:
         // if record exists, we don't need to crash-exit, just return error to client
         status = insert_command_completion( status, aEPState, aReq, aCommand, aCommandOrdinal, aSeqNo );
         aCommand->Transit( SKV_SERVER_COMMAND_STATE_INIT );
-
         break;
+
+      case SKV_ERRNO_COMMAND_LIMIT_REACHED:
+        AssertLogLine( 1 )
+          << "skv_server_insert_command_sm::insert_sequence():: Back-end ran out of command slots."
+          << EndLogLine;
+        break;
+
       default:
         BegLogLine( SKV_SERVER_INSERT_LOG )
           << "skv_server_insert_command_sm::Execute()::ERROR in local insert"
@@ -345,12 +352,13 @@ public:
               << EndLogLine;
 
             skv_lmr_triplet_t ValueRepInStore;
-            skv_local_kv_cookie_t cookie( aCommandOrdinal, aEPState );
+            skv_local_kv_cookie_t *cookie = &Command->mLocalKVCookie;
+            cookie->Set( aCommandOrdinal, aEPState );
             skv_cmd_RIU_req_t *Req;
             status = insert_lookup_sequence( aLocalKV,
                                              Command,
                                              &Req,
-                                             &cookie,
+                                             cookie,
                                              &ValueRepInStore);
             switch( status )
             {
@@ -363,6 +371,10 @@ public:
                   << " record is locked"
                   << EndLogLine;
 
+                aEventQueueManager->Enqueue( aEvent );
+                return SKV_SUCCESS;
+
+              case SKV_ERRNO_COMMAND_LIMIT_REACHED:
                 aEventQueueManager->Enqueue( aEvent );
                 return SKV_SUCCESS;
 
@@ -502,10 +514,11 @@ public:
               << " Ord: " << aCommandOrdinal
               << EndLogLine;
 
-            skv_local_kv_cookie_t cookie( aCommandOrdinal, aEPState );
+            skv_local_kv_cookie_t *cookie = &Command->mLocalKVCookie;
+            cookie->Set( aCommandOrdinal, aEPState );
             status = aLocalKV->InsertPostProcess( &(Command->mLocalKVData.mRDMA.mReqCtx ),
                                                   &(Command->mLocalKVData.mRDMA.mValueRDMADest),
-                                                  &cookie );
+                                                  cookie );
 
             if( status == SKV_ERRNO_LOCAL_KV_EVENT )
             {

@@ -1,13 +1,15 @@
 /************************************************
- * Copyright (c) IBM Corp. 2007-2014
+ * Copyright (c) IBM Corp. 2014
  * All rights reserved. This program and the accompanying materials
  * are made available under the terms of the Eclipse Public License v1.0
  * which accompanies this distribution, and is available at
  * http://www.eclipse.org/legal/epl-v10.html
- * 
+ *************************************************/
+
+/*
  * Contributors:
  *     arayshu, lschneid - initial implementation
- *************************************************/
+ */
 
 #include <client/skv_client.hpp>
 #include <client/skv_client_internal.hpp>
@@ -31,8 +33,9 @@ TraceClient SKVClientInsertFinis;
 #ifdef SKV_CLIENT_UNI
 skv_status_t
 skv_client_t::
-Init( skv_client_group_id_t  aCommGroupId,  
-      int                    aFlags  )
+Init( skv_client_group_id_t aCommGroupId,
+      int aFlags,
+      const char* aConfigFile )
 {
   mSKVClientInternalPtr = malloc( sizeof( skv_client_internal_t ));
   StrongAssertLogLine( mSKVClientInternalPtr != NULL )
@@ -45,9 +48,10 @@ Init( skv_client_group_id_t  aCommGroupId,
 #else
 skv_status_t
 skv_client_t::
-Init( skv_client_group_id_t  aCommGroupId,  
-      MPI_Comm               aComm,
-      int                    aFlags  )
+Init( skv_client_group_id_t aCommGroupId,
+      MPI_Comm aComm,
+      int aFlags,
+      const char* aConfigFile )
 {
   mSKVClientInternalPtr = malloc( sizeof( skv_client_internal_t ));
   StrongAssertLogLine( mSKVClientInternalPtr != NULL )
@@ -56,7 +60,8 @@ Init( skv_client_group_id_t  aCommGroupId,
 
   return ((skv_client_internal_t *)mSKVClientInternalPtr)->Init( aCommGroupId,  
                                                                  aComm,
-                                                                 aFlags );
+                                                                 aFlags,
+                                                                 aConfigFile );
 }
 #endif
 skv_status_t 
@@ -75,10 +80,10 @@ Disconnect()
  ***/
 skv_status_t 
 skv_client_t::
-Connect( const char* aServerGroupName, 
+Connect( const char* aConfigFile,
          int         aFlags )
 {
-  return ((skv_client_internal_t *)mSKVClientInternalPtr)->Connect( aServerGroupName,
+  return ((skv_client_internal_t *)mSKVClientInternalPtr)->Connect( aConfigFile,
                                                                     aFlags );
 }
 

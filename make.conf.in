@@ -1,20 +1,19 @@
 ########################################
-# Copyright (c) IBM Corp. 2011-2014
+# Copyright (c) IBM Corp. 2014
 # All rights reserved. This program and the accompanying materials
 # are made available under the terms of the Eclipse Public License v1.0
 # which accompanies this distribution, and is available at
 # http://www.eclipse.org/legal/epl-v10.html
-#
-# Contributors:
-#     lschneid - initial implementation
 ########################################
-
 
 # SKV build configuration file
 #
-# IMPORTANT: make sure that TOP is correctly set before including this
+# IMPORTANT: make sure that SKV_TOP is correctly set before including this
 #            make.conf file!
 #
+
+include ${SKV_TOP}/make.conf_${SKV_CONF}
+
 #############################################
 # Definition whether we build for BG/Q developer env or not
 # no  - build for BG/Q
@@ -25,18 +24,8 @@ SKV_FOR_NONBGQ=no
 # Define the local KV backend to use
 # inmem    - in-memory version of local kv
 # asyncmem - async in-memory version for testing
-# leveldb  - leveldb backend (tbd)
+# rocksdb  - rocksdb backend (tbd)
 SKV_LOCAL_KV_BACKEND=inmem
-
-#############################################
-# specify which parts of the code you want to build and install
-# available options are: (note that the ordering is important!!)
-#  - lib  (C library for PIMD clients)
-#  - src  (actual skv code, libs, server)
-#  - test   (test routines)
-#  - system/bgq (system files for BGQ Linux environment)
-SKV_DEST=src lib test system/bgq
-
 
 # variable for build process verbosity
 # if set to no, only warnings, brief status and errors will show up
@@ -45,40 +34,41 @@ SKV_MAKE_VERBOSE=yes
 
 #############################################
 # settings for the local KV-store implementation to use
-ifeq (${SKV_LOCAL_KV_BACKEND}, leveldb)
-  LOCAL_KV=leveldb
 
-  ifeq (${SKV_FOR_NONBGQ}, yes)
-    LOCAL_KV_DIR=$(TOP)/$(LOCAL_KV)
-  else
-    LOCAL_KV_DIR=$(ASF_ROOTFS_DIR)/opt/$(LOCAL_KV)
-  endif
+ifeq (${SKV_FOR_NONBGQ}, yes)
+  LOCAL_KV_DIR=$(SKV_TOP)/../$(SKV_LOCAL_KV_BACKEND)
+else
+  LOCAL_KV_DIR=$(INSTALL_ROOTFS_DIR)/opt/$(SKV_LOCAL_KV_BACKEND)
+endif
 
-  LOCAL_KV_INCLUDE_OPTS=-I$(LOCAL_KV_DIR)/include
-  LOCAL_KV_LIB_OPTS=-L$(LOCAL_KV_DIR)/lib64
-endif
-ifeq (${SKV_LOCAL_KV_BACKEND}, inmem)
-  LOCAL_KV_INCLUDE_OPTS=
-  LOCAL_KV_LIB_OPTS=
-endif
+
+# set backend options according to name of local kv back end
+LOCAL_KV_INCLUDE_OPTS_inmem=
+LOCAL_KV_LIB_OPTS_inmem=
+
+LOCAL_KV_INCLUDE_OPTS_asyncmem=
+LOCAL_KV_LIB_OPTS_asyncmem=
+
+LOCAL_KV_INCLUDE_OPTS_rocksdb=-I$(LOCAL_KV_DIR)/include
+LOCAL_KV_LIB_OPTS_rocksdb=$(LOCAL_KV_DIR)/librocksdb.a
+
+LOCAL_KV_INCLUDE_OPTS=${LOCAL_KV_INCLUDE_OPTS_${SKV_LOCAL_KV_BACKEND}}
+LOCAL_KV_LIB_OPTS=${LOCAL_KV_LIB_OPTS_${SKV_LOCAL_KV_BACKEND}}
+
+
+SKV_VERBS_PROVIDER?=.roq
+
+FXLOGGER_DIR?=${SKV_TOP}/../shared/FxLogger
 
 #############################################
 # setting compiler location for MPI-based programs
-SKV_MPI_IMPL=mvapich2
-
-ifeq (${SKV_FOR_NONBGQ}, yes)
-  MPI_DIR?=~/Software/mpich2-1.4.1p1
-  SKV_VERBS_PROVIDER=.siw
-else
-  MPI_DIR?=/opt/${SKV_MPI_IMPL}
-  SKV_VERBS_PROVIDER=.roq
-endif
-
-MPICC=${MPI_DIR}/bin/mpicc -std=c99
+MPICC=${MPI_DIR}/bin/mpicc
 MPICXX=${MPI_DIR}/bin/mpicxx
 MPI_LIBS=-L${MPI_DIR}/lib
-SLURM_DIR=#$(TOP)/ramdisk/modules/slurm/build/opt/slurm
-SLURM_FLAGS=#-L${SLURM_DIR}/lib -lslurm
+#SLURM_DIR=$(SKV_TOP)/../ramdisk/modules/slurm/build/opt/slurm
+#SKV_SLURM_OPTS=-L${SLURM_DIR}/lib -lslurm
+SKV_SLURM_OPTS=
+
 
 SKV_INCLUDE_FILEBASED=no
 
@@ -97,6 +87,9 @@ SKV_CONFIG+=-DPKFXLOG
 
 # enable command header checksum
 SKV_CONFIG+=-DSKV_HEADER_CHECKSUM
+
+# enable workaround for missing RoQ loopback functionality
+SKV_CONFIG+=-DSKV_ROQ_LOOPBACK_WORKAROUND
 
 # set the local kv backend for SKV
 SKV_CONFIG+=-DSKV_SERVER_LOCAL_KV=skv_local_kv_$(SKV_LOCAL_KV_BACKEND)
@@ -124,7 +117,7 @@ SKV_CONFIG+=-DSKV_SERVER_LOCAL_KV=skv_local_kv_$(SKV_LOCAL_KV_BACKEND)
 #SKV_CONFIG+=-DSKV_SERVER_ACTIVE_BCAST_COMMAND_SM_LOG=1
 #SKV_CONFIG+=-DSKV_SERVER_BUFFER_AND_COMMAND_LOG=1
 #SKV_CONFIG+=-DSKV_SERVER_CLEANUP_LOG=1
-SKV_CONFIG+=-DSKV_SERVER_CLIENT_CONN_EST_LOG=1
+#SKV_CONFIG+=-DSKV_SERVER_CLIENT_CONN_EST_LOG=1
 #SKV_CONFIG+=-DSKV_SERVER_COMMAND_DISPATCH_LOG=1
 #SKV_CONFIG+=-DSKV_SERVER_COMMAND_POLLING_LOG=1
 #SKV_CONFIG+=-DSKV_SERVER_COMMAND_TRANSIT_LOG=1
@@ -134,6 +127,7 @@ SKV_CONFIG+=-DSKV_SERVER_CLIENT_CONN_EST_LOG=1
 #SKV_CONFIG+=-DSKV_SERVER_GET_COMMAND_LOG=1
 #SKV_CONFIG+=-DSKV_SERVER_HEAP_MANAGER_LOG=1
 #SKV_CONFIG+=-DSKV_SERVER_INSERT_LOG=1
+#SKV_CONFIG+=-DSKV_SERVER_LOCAL_KV_EVENT_SOURCE_LOG=1
 #SKV_CONFIG+=-DSKV_SERVER_LOCK_LOG=1
 #SKV_CONFIG+=-DSKV_SERVER_NETWORK_EVENT_MANAGER_LOG=1
 #SKV_CONFIG+=-DSKV_SERVER_OPEN_COMMAND_SM_LOG=1
@@ -143,6 +137,7 @@ SKV_CONFIG+=-DSKV_SERVER_CLIENT_CONN_EST_LOG=1
 #SKV_CONFIG+=-DSKV_SERVER_REMOVE_COMMAND_LOG=1
 #SKV_CONFIG+=-DSKV_SERVER_RETRIEVE_COMMAND_SM_LOG=1
 #SKV_CONFIG+=-DSKV_SERVER_RETRIEVE_DIST_LOG=1
+#SKV_CONFIG+=-DSKV_SERVER_RETRIEVE_N_KEYS_COMMAND_SM_LOG=1
 #SKV_CONFIG+=-DSKV_SERVER_TREE_BASED_CONTAINER_LOG=1
 #SKV_CONFIG+=-DSKV_SERVER_TREE_BASED_CONTAINER_INIT_LOG=1
 #SKV_CONFIG+=-DSKV_SERVER_TREE_BASED_CONTAINER_OPEN_LOG=1
@@ -153,8 +148,9 @@ SKV_CONFIG+=-DSKV_SERVER_CLIENT_CONN_EST_LOG=1
 
 ########################
 # server side local kv logging
-#SKV_CONFIG+=-DSKV_SERVER_LOCAL_KV_EVENT_SOURCE_LOG=1
+#SKV_CONFIG+=-DSKV_LOCAL_KV_ASYNCMEM_PROCESSING_LOG=1
 #SKV_CONFIG+=-DSKV_LOCAL_KV_BACKEND_LOG=1
+#SKV_CONFIG+=-DSKV_LOCAL_KV_QUEUES_LOG=1
 
 
 ################
@@ -163,7 +159,7 @@ SKV_CONFIG+=-DSKV_SERVER_CLIENT_CONN_EST_LOG=1
 #SKV_CONFIG+=-DSKV_CLIENT_BULK_INSERT_LOG=1
 #SKV_CONFIG+=-DSKV_CLIENT_C2S_ACTIVE_BCAST_LOG=1
 #SKV_CONFIG+=-DSKV_CLIENT_CONN_INFO_LOG=1
-#SKV_CONFIG+=-DSKV_CLIENT_CURSOR_STREAM_LOG=1
+#SKV_CONFIG+=-DSKV_CLIENT_CURSOR_LOG=1
 #SKV_CONFIG+=-DSKV_CLIENT_CCB_MANAGER_LOG=1
 #SKV_CONFIG+=-DSKV_CLIENT_FREE_QUEUE_LOG=1
 #SKV_CONFIG+=-DSKV_CLIENT_INSERT_COMMAND_SM_LOG=1
@@ -178,6 +174,7 @@ SKV_CONFIG+=-DSKV_SERVER_CLIENT_CONN_EST_LOG=1
 #SKV_CONFIG+=-DSKV_CLIENT_RESPONSE_POLLING_LOG=1
 #SKV_CONFIG+=-DSKV_CLIENT_RETRIEVE_COMMAND_SM_LOG=1
 #SKV_CONFIG+=-DSKV_CLIENT_RETRIEVE_LOG=1
+#SKV_CONFIG+=-DSKV_CLIENT_RETRIEVE_N_KEYS_DIST_LOG=1
 #SKV_CONFIG+=-DSKV_CLIENT_REMOVE_LOG=1
 
 #SKV_CONFIG+=-DSKV_DEBUG_MSG_MARKER
@@ -227,8 +224,8 @@ endif
 #############################################
 # SKV-specific locations
 
-# set skv base directory  (for now called pimd because the repository name didn't change)
-SKV_BASE_DIR=${TOP}
+# set skv base directory
+SKV_BASE_DIR=${SKV_TOP}
 
 # set central include dir for skv
 SKV_INCLUDE_DIR=${SKV_BASE_DIR}/include
@@ -238,22 +235,16 @@ SKV_BUILD_DIR = ${SKV_BASE_DIR}/build
 
 # set location within booted system/ramdisk (path where to install)
 SKV_PREFIX=/opt/skv
-SKV_INSTALL_DIR=${ASF_ROOTFS_DIR}${SKV_PREFIX}
+SKV_INSTALL_DIR=${INSTALL_ROOTFS_DIR}${SKV_PREFIX}
 
 
 #############################################
 # specify flags for all skv subdirs
-SKV_INCLUDE_DIRS=-I${TOP}/FxLogger -I${TOP}/FxLogger/Pk -I${TOP}/it_api/include -I${MPI_DIR}/include -I${SKV_BASE_DIR}/profiler -I${SKV_BASE_DIR}/lib/include ${LOCAL_KV_INCLUDE_OPTS}
-SKV_GLOBAL_CXXFLAGS=${SKV_CONFIG} ${SKV_INCLUDE_DIRS}
-SKV_GLOBAL_CFLAGS=${SKV_CONFIG} ${SKV_INCLUDE_DIRS}
+SKV_INCLUDE_DIRS=-I${FXLOGGER_DIR} -I${FXLOGGER_DIR}/Pk -I${SKV_TOP}/it_api/include -I${MPI_DIR}/include -I${SKV_BASE_DIR}/profiler -I${SKV_BASE_DIR}/lib/include ${LOCAL_KV_INCLUDE_OPTS}
+SKV_GLOBAL_CXXFLAGS=${SKV_CONFIG} ${SKV_INCLUDE_DIRS}  ${SKV_CCFLAGS}
+SKV_GLOBAL_CFLAGS=${SKV_CONFIG} ${SKV_INCLUDE_DIRS}  -std=c99
 
-ifeq (${SKV_FOR_NONBGQ}, yes)
-  SKV_GLOBAL_LDFLAGS_EXTENSION=-libverbs -lrdmacm
-else
-  SKV_GLOBAL_LDFLAGS_EXTENSION=${SLURM_FLAGS} -L${ASF_ROOTFS_DIR}/opt/ofed/lib64 -libverbs -lrdmacm
-endif
-
-SKV_GLOBAL_LDFLAGS=${SKV_CONFIG} ${TOP}/FxLogger/libPkLinux.a ${TOP}/it_api/build/libit_api_o_verbs.a -L${MPI_DIR}/lib ${LOCAL_KV_LIB_OPTS} ${SKV_GLOBAL_LDFLAGS_EXTENSION} -lrt
+SKV_GLOBAL_LDFLAGS=${SKV_CONFIG} ${SKV_CCFLAGS} ${FXLOGGER_DIR}/libPkLinux.a ${SKV_TOP}/build/libit_api_o_verbs.a -L${MPI_DIR}/lib ${LOCAL_KV_LIB_OPTS} ${SKV_GLOBAL_LDFLAGS_EXTENSION} -lrt
 
 
 #############################################
@@ -274,6 +265,8 @@ else
 endif
 
 
+AR?=ar
+
 
 
 ###############################################
@@ -290,4 +283,3 @@ endif
 # removed because new build system creates MPI and non-MPI version
 # configure for non-MPI clients
 #SKV_CONFIG+=-DSKV_CLIENT_UNI
-

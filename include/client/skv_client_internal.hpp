@@ -1,13 +1,15 @@
 /************************************************
- * Copyright (c) IBM Corp. 2007-2014
+ * Copyright (c) IBM Corp. 2014
  * All rights reserved. This program and the accompanying materials
  * are made available under the terms of the Eclipse Public License v1.0
  * which accompanies this distribution, and is available at
  * http://www.eclipse.org/legal/epl-v10.html
- * 
+ *************************************************/
+
+/*
  * Contributors:
  *     arayshu, lschneid - initial implementation
- *************************************************/
+ */
 
 #ifndef __SKV_CLIENT_INTERNAL_HPP__
 #define __SKV_CLIENT_INTERNAL_HPP__
@@ -117,18 +119,17 @@ class skv_client_internal_t
 
     // Initializes server's state
 #ifndef SKV_CLIENT_UNI
-    skv_status_t Init(skv_client_group_id_t aCommGroupId, MPI_Comm aComm, int aFlags);
+    skv_status_t Init(skv_client_group_id_t aCommGroupId, MPI_Comm aComm, int aFlags, const char* aConfigFile = NULL );
 
     skv_status_t SetCommunicator(MPI_Comm aComm);
 #else
-    skv_status_t Init( skv_client_group_id_t aCommGroupId,
-        int aFlags );
+    skv_status_t Init( skv_client_group_id_t aCommGroupId, int aFlags, const char* aConfigFile = NULL );
 #endif
 
     // Removes state and shuts down the server
     skv_status_t Finalize();
 
-    skv_status_t Connect(const char* aServerGroupName, int aFlags);
+    skv_status_t Connect(const char* aConfigFile, int aFlags);
     skv_status_t Disconnect();
 
     /***

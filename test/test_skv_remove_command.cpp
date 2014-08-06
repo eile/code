@@ -1,13 +1,15 @@
 /************************************************
- * Copyright (c) IBM Corp. 2007-2014
+ * Copyright (c) IBM Corp. 2014
  * All rights reserved. This program and the accompanying materials
  * are made available under the terms of the Eclipse Public License v1.0
  * which accompanies this distribution, and is available at
  * http://www.eclipse.org/legal/epl-v10.html
- * 
+ *************************************************/
+
+/*
  * Contributors:
  *     arayshu, lschneid - initial implementation
- *************************************************/
+ */
 
 #include <time.h>
 #include <mpi.h>
@@ -49,13 +51,6 @@ main(int argc, char **argv)
 
   data_direction = 1;
 
-  StrongAssertLogLine( argc == 2 )
-    << "test_skv_remove_command::main():: ERROR:: server address expected as arg2 "
-    << " argc: " << argc
-    << EndLogLine; 
-
-  char* ServerAddress = argv[ 1 ];  
-
   int Rank = 0;
   int NodeCount = 1;
 
@@ -92,23 +87,20 @@ main(int argc, char **argv)
    ****************************************************************************/ 
   BegLogLine( 1 )
     << "test_skv_remove_command::main():: About to connect "
-    << " ServerAddress: " << ServerAddress
     << EndLogLine;
 
-  status = Client.Connect( ServerAddress, 0 );
+  status = Client.Connect( NULL, 0 );
 
   if( status == SKV_SUCCESS )
     {
       BegLogLine( 1 )
-        << "test_skv_remove_command::main():: SKV Client connected to "
-        << " server at { " << ServerAddress << " }"
+        << "test_skv_remove_command::main():: SKV Client connected"
         << EndLogLine;
     }
   else
     {
       BegLogLine( 1 )
         << "test_skv_remove_command::main():: SKV Client FAILED to connect "
-        << " server at { " << ServerAddress << " }"
         << " status: " << skv_status_to_string( status )
         << EndLogLine;
     }

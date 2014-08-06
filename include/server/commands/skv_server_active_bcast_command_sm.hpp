@@ -1,13 +1,15 @@
 /************************************************
- * Copyright (c) IBM Corp. 2007-2014
+ * Copyright (c) IBM Corp. 2014
  * All rights reserved. This program and the accompanying materials
  * are made available under the terms of the Eclipse Public License v1.0
  * which accompanies this distribution, and is available at
  * http://www.eclipse.org/legal/epl-v10.html
- * 
+ *************************************************/
+
+/*
  * Contributors:
  *     arayshu, lschneid - initial implementation
- *************************************************/
+ */
 
 #ifndef __SKV_SERVER_ACTIVE_BCAST_COMMAND_SM_HPP__
 #define __SKV_SERVER_ACTIVE_BCAST_COMMAND_SM_HPP__
@@ -99,10 +101,12 @@ public:
           {
             skv_server_cursor_hdl_t ServCursorHdl;
 
+            skv_local_kv_cookie_t *cookie = &Command->mLocalKVCookie;
+            cookie->Set( aCommandOrdinal, aEPState );
             skv_status_t cstatus = aLocalKV->CreateCursor( Buff,
                                                            BuffSize,
                                                            & ServCursorHdl,
-                                                           (skv_local_kv_cookie_t*)Command );
+                                                           cookie );
 
             skv_cmd_active_bcast_resp_t* Resp = (skv_cmd_active_bcast_resp_t *) Command->GetSendBuff();
             Resp->mHdr                = Command->mCommandState.mCommandActiveBcast.mHdr;

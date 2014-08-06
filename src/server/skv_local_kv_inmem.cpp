@@ -1,15 +1,17 @@
 /************************************************
- * Copyright (c) IBM Corp. 2013-2014
+ * Copyright (c) IBM Corp. 2014
  * All rights reserved. This program and the accompanying materials
  * are made available under the terms of the Eclipse Public License v1.0
  * which accompanies this distribution, and is available at
  * http://www.eclipse.org/legal/epl-v10.html
  *
- * Contributors:
+ *************************************************/
+
+/* Contributors:
  *     lschneid - initial implementation
  *
  * Created on: Jan 13, 2014
- *************************************************/
+ */
 
 #ifndef SKV_LOCAL_KV_BACKEND_LOG
 #define SKV_LOCAL_KV_BACKEND_LOG ( 0 | SKV_LOGGING_ALL )
@@ -368,7 +370,7 @@ skv_local_kv_inmem::Insert( skv_cmd_RIU_req_t *aReq,
 
         // if the new size is exactly the previous size, there's nothing to adjust
         // just make sure the LMR is pointing to the right location
-        if( ValueSize == aStoredValueRep->GetLen() )
+        if( (uint64_t)ValueSize == aStoredValueRep->GetLen() )
         {
           BegLogLine( SKV_LOCAL_KV_BACKEND_LOG )
             << "skv_local_kv_inmem::Insert():: UPDATE same length record, overwriting..."
@@ -678,7 +680,7 @@ skv_local_kv_inmem::Retrieve( skv_pds_id_t aPDSId,
     *aTotalSize = 0;
 
   BegLogLine( SKV_LOCAL_KV_BACKEND_LOG )
-    << "skv_local_kv_asyncmem:: storing valueRep:" << *aStoredValueRep
+    << "skv_local_kv_inmem:: storing valueRep:" << *aStoredValueRep
     << " status:" << skv_status_to_string( status )
     << EndLogLine;
 
@@ -848,7 +850,7 @@ skv_local_kv_inmem::BulkInsert( skv_pds_id_t aPDSId,
 
     int TotalSize = KeySize + ValueSize;
 
-#if SKV_LOCAL_KV_BACKEND_LOG
+#if 0 //SKV_LOCAL_KV_BACKEND_LOG
     int BytesInRow = skv_bulk_insert_get_total_len( LocalBufferAddr );
 
     HexDump FxString( LocalBufferAddr, BytesInRow );

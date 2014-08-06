@@ -1,13 +1,15 @@
 /************************************************
- * Copyright (c) IBM Corp. 2007-2014
+ * Copyright (c) IBM Corp. 2014
  * All rights reserved. This program and the accompanying materials
  * are made available under the terms of the Eclipse Public License v1.0
  * which accompanies this distribution, and is available at
  * http://www.eclipse.org/legal/epl-v10.html
- * 
+ *************************************************/
+
+/*
  * Contributors:
  *     arayshu, lschneid - initial implementation
- *************************************************/
+ */
 
 #include <endian.h>
 #include <sys/types.h>
@@ -27,7 +29,6 @@
 #include <server/skv_server_network_event_manager.hpp>
 
 // include the implementations of the local kv backend
-#include <server/skv_local_kv_types.hpp>
 #include <server/skv_local_kv_interface.hpp>
 
 // include the various event sources
@@ -808,7 +809,7 @@ ProcessEvent( skv_server_state_t  aState,
         }
         case SKV_SERVER_EVENT_TYPE_IT_DTO_INSERT_CMD:
         {
-              skv_server_ep_state_t* EPStatePtr = aEvent->mEventMetadata.mCommandFinder.mEPStatePtr;
+          skv_server_ep_state_t* EPStatePtr = aEvent->mEventMetadata.mCommandFinder.mEPStatePtr;
           int CmdOrd = aEvent->mEventMetadata.mCommandFinder.mCommandOrd;
 
           // status = EPStatePtr->EPResourceCheckAndQueue( aEvent );
@@ -1580,6 +1581,7 @@ Init( int   aRank,
       char buff[ SKV_MAX_SERVER_ADDR_NAME_LENGTH ];
       bzero( buff, SKV_MAX_SERVER_ADDR_NAME_LENGTH );
 
+#ifdef SKV_ROQ_LOOPBACK_WORKAROUND
       // replace local hostname by loopback address
       if(  ( strlen( ServerName ) == strlen( ServerI ) ) &&
            ( strncmp( ServerName, ServerI, strlen( ServerName ) ) == 0 ) )
@@ -1587,6 +1589,7 @@ Init( int   aRank,
         snprintf( buff, SKV_MAX_SERVER_ADDR_NAME_LENGTH, "127.0.0.1 %s", PortI);
       }
       else
+#endif
       {
         snprintf( buff, SKV_MAX_SERVER_ADDR_NAME_LENGTH, "%s %s", ServerI, PortI);
       }

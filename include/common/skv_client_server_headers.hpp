@@ -1,13 +1,15 @@
 /************************************************
- * Copyright (c) IBM Corp. 2007-2014
+ * Copyright (c) IBM Corp. 2014
  * All rights reserved. This program and the accompanying materials
  * are made available under the terms of the Eclipse Public License v1.0
  * which accompanies this distribution, and is available at
  * http://www.eclipse.org/legal/epl-v10.html
- * 
+ *************************************************/
+
+/*
  * Contributors:
  *     arayshu, lschneid - initial implementation
- *************************************************/
+ */
 
 #ifndef __SKV_CLIENT_SERVER_HEADERS_HPP__
 #define __SKV_CLIENT_SERVER_HEADERS_HPP__
@@ -61,8 +63,8 @@ struct skv_client_to_server_cmd_hdr_t
   {
     char cs = 0;
     char *buf = (char*)this;
-    for( int i=0; i<sizeof(skv_client_to_server_cmd_hdr_t); i++ )
-    cs += (i*buf[i]);
+    for( unsigned int i=0; i<sizeof(skv_client_to_server_cmd_hdr_t); i++ )
+      cs += (i*buf[i]);
     if( cs == 0 )
     cs = -1;
     return cs;
@@ -179,7 +181,7 @@ struct skv_server_to_client_cmd_hdr_t
   {
     char cs = 0;
     char *buf = (char*)this;
-    for( int i=0; i<sizeof(skv_server_to_client_cmd_hdr_t); i++ )
+    for( unsigned int i=0; i<sizeof(skv_server_to_client_cmd_hdr_t); i++ )
       cs += (i*buf[i]+1);
     if( cs == 0 )
       cs = 1;

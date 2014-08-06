@@ -1,13 +1,15 @@
 /************************************************
- * Copyright (c) IBM Corp. 2007-2014
+ * Copyright (c) IBM Corp. 2014
  * All rights reserved. This program and the accompanying materials
  * are made available under the terms of the Eclipse Public License v1.0
  * which accompanies this distribution, and is available at
  * http://www.eclipse.org/legal/epl-v10.html
- * 
+ *************************************************/
+
+/*
  * Contributors:
  *     arayshu, lschneid - initial implementation
- *************************************************/
+ */
 
 #include <time.h>
 #include <mpi.h>
@@ -105,13 +107,6 @@ main(int argc, char **argv)
   FxLogger_Init( argv[ 0 ] );
   pkTraceServer::Init();
 
-  StrongAssertLogLine( argc == 2 )
-    << "skv_test_n_inserts_retrieves::main():: ERROR:: "
-    << " argc: " << argc
-    << EndLogLine; 
-
-  char* ServerAddress = argv[ 1 ];  
-
   int Rank = 0;
   int NodeCount = 1;
 
@@ -154,23 +149,20 @@ main(int argc, char **argv)
    ****************************************************************************/ 
   BegLogLine( 1 )
     << "skv_test_n_inserts_retrieves::main():: About to connect "
-    << " ServerAddress: " << ServerAddress
     << EndLogLine;
 
-  status = Client.Connect( ServerAddress, 0 );
+  status = Client.Connect( NULL, 0 );
 
   if( status == SKV_SUCCESS )
     {
       BegLogLine( 1 )
-        << "skv_test_n_inserts_retrieves::main():: SKV Client connected to "
-        << " server at { " << ServerAddress << " }"
+        << "skv_test_n_inserts_retrieves::main():: SKV Client connected "
         << EndLogLine;
     }
   else
     {
       BegLogLine( 1 )
         << "skv_test_n_inserts_retrieves::main():: SKV Client FAILED to connect "
-        << " server at { " << ServerAddress << " }"
         << " status: " << skv_status_to_string( status )
         << EndLogLine;
     }

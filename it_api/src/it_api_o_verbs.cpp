@@ -1,13 +1,15 @@
 /************************************************
- * Copyright (c) IBM Corp. 2007-2014
+ * Copyright (c) IBM Corp. 2014
  * All rights reserved. This program and the accompanying materials
  * are made available under the terms of the Eclipse Public License v1.0
  * which accompanies this distribution, and is available at
  * http://www.eclipse.org/legal/epl-v10.html
- *
+ *************************************************/
+
+/*
  * Contributors:
  *     arayshu, lschneid - initial implementation
- *************************************************/
+ */
 
 #include <FxLogger.hpp>
 #include <Trace.hpp>
@@ -63,6 +65,8 @@ extern "C"
 #endif
 
 //#define IT_API_POST_OP_RETRIES 3
+//#define ROQ_SGE_WORKAROUND
+
 
 #define IT_API_NETWORK_TIMEOUT 20000   // set a network timeout in ms
 
@@ -845,6 +849,49 @@ it_api_o_verbs_post_op( IN it_api_o_verbs_post_opcode_t post_op,
       rdmaw_wr.wr.rdma.remote_addr = (uint64_t) rdma_addr;
       rdmaw_wr.wr.rdma.rkey        = rmr_context;
 
+#ifdef ROQ_SGE_WORKAROUND
+      struct ibv_send_wr           rdmaw_seg_wr[ IT_API_O_VERBS_MAX_SGE_LIST_SIZE ];
+      rdmaw_wr.num_sge = 1;   // reset to only one seg
+      if( num_segments > 1 )
+      {
+        uint64_t offset = rdmaw_wr.sg_list[ 0 ].length;
+        int remaining_segs = num_segments-1;
+        bzero( (void *) rdmaw_seg_wr, sizeof( ibv_send_wr ) * num_segments );
+
+        rdmaw_wr.next = &( rdmaw_seg_wr[ 0 ] );
+        rdmaw_wr.send_flags = ibv_send_flags & (~IBV_SEND_SIGNALED);
+        for ( int sge=0; sge<remaining_segs; sge++ )
+        {
+          rdmaw_seg_wr[ sge ].wr_id = (uint64_t) (elem+((sge+1)*0x10000));
+          rdmaw_seg_wr[ sge ].opcode = opcode;
+          rdmaw_seg_wr[ sge ].sg_list = &( local_sge[ sge+1 ] );
+          rdmaw_seg_wr[ sge ].num_sge = 1;
+
+          rdmaw_seg_wr[ sge ].wr.rdma.remote_addr = (uint64_t) rdma_addr + offset;
+          rdmaw_seg_wr[ sge ].wr.rdma.rkey = rmr_context;
+          if( sge < remaining_segs-1 )
+          {
+            rdmaw_seg_wr[ sge ].next = & rdmaw_seg_wr[ sge+1 ];
+            rdmaw_seg_wr[ sge ].send_flags = ibv_send_flags & (~IBV_SEND_SIGNALED);
+          }
+          else
+          {
+            rdmaw_seg_wr[ sge ].next = NULL;
+            rdmaw_seg_wr[ sge ].send_flags = ibv_send_flags;
+          }
+          BegLogLine( FXLOG_IT_API_O_VERBS )
+            << "IT_API: assembled next SGE: " << sge+1
+            << " id: " << rdmaw_seg_wr[ sge ].wr_id
+            << " raddr: " <<  rdmaw_seg_wr[ sge ].wr.rdma.remote_addr
+            << " len: " << rdmaw_seg_wr[ sge ].sg_list[0].length
+            << EndLogLine;
+
+          offset += rdmaw_seg_wr[ sge ].sg_list[ 0 ].length;
+        }
+      }
+#endif
+
+
       unsigned short *srv_fake_cookie = &(((unsigned short*)&cookie)[1]);
 
       BegLogLine( FXLOG_IT_API_O_VERBS )
@@ -1080,6 +1127,8 @@ it_api_o_verbs_poll_cq( it_dto_cmpl_event_t *    aEvent,
   return IT_ERR_QUEUE_EMPTY;
 }
 
+#define MIN( x, y ) ( (x)<(y)? (x) : (y) )
+
 it_status_t
 it_api_o_verbs_handle_cm_event( it_api_o_verbs_cq_mgr_t* aCQ,
                                 it_connection_event_t*   aIT_Event, 
@@ -1123,12 +1172,16 @@ it_api_o_verbs_handle_cm_event( it_api_o_verbs_cq_mgr_t* aCQ,
     }
 
   if( aRDMA_Event->param.conn.private_data_len > 0 )
-    {
-      aIT_Event->private_data_present = (it_boolean_t) 1;
-      memcpy( aIT_Event->private_data, 
-              aRDMA_Event->param.conn.private_data,
-              aRDMA_Event->param.conn.private_data_len );
-    }
+  {
+    if( aRDMA_Event->param.conn.private_data_len > IT_MAX_PRIV_DATA )
+      printf( "WARNING: it_api_o_verbs_handle_cm_event:: private data len too large. reserved: %d, actual: %d. potential data truncation\n",
+              IT_MAX_PRIV_DATA, aRDMA_Event->param.conn.private_data_len );
+
+    memcpy( aIT_Event->private_data,
+            aRDMA_Event->param.conn.private_data,
+            MIN( aRDMA_Event->param.conn.private_data_len, IT_MAX_PRIV_DATA ) );
+    aIT_Event->private_data_present = (it_boolean_t) 1;
+  }
 
   return IT_SUCCESS;
 }
@@ -1142,12 +1195,16 @@ it_api_o_verbs_handle_cr_event( it_api_o_verbs_cq_mgr_t* aCQ,
   aIT_Event->evd          = (it_evd_handle_t) aCQ;
 
   if( aRDMA_Event->param.conn.private_data_len > 0 )
-    {
-      aIT_Event->private_data_present = (it_boolean_t) 1;
-      memcpy( aIT_Event->private_data, 
-              aRDMA_Event->param.conn.private_data,
-              aRDMA_Event->param.conn.private_data_len );
-    }
+  {
+    if( aRDMA_Event->param.conn.private_data_len > IT_MAX_PRIV_DATA )
+      printf( "WARNING: it_api_o_verbs_handle_cr_event:: private data len too large. reserved: %d, actual: %d. potential data truncation\n",
+              IT_MAX_PRIV_DATA, aRDMA_Event->param.conn.private_data_len );
+
+    memcpy( aIT_Event->private_data,
+            aRDMA_Event->param.conn.private_data,
+            MIN( aRDMA_Event->param.conn.private_data_len, IT_MAX_PRIV_DATA ) );
+    aIT_Event->private_data_present = (it_boolean_t) 1;
+  }
 
   aIT_Event->cn_est_id = (it_cn_est_identifier_t) aRDMA_Event->id;
 
@@ -2492,9 +2549,13 @@ it_status_t it_ep_connect (
   memset(&conn_param, 0, sizeof(conn_param));
   conn_param.initiator_depth = qpMgr->ep_attr.srv.rc.rdma_read_ird;   //IT_RDMA_INITIATOR_DEPTH;
   conn_param.responder_resources = qpMgr->ep_attr.srv.rc.rdma_read_ord; // IT_RDMA_RESPONDER_RESOUCES;
-  conn_param.retry_count = 2;
+  conn_param.retry_count = 7;
   conn_param.private_data = private_data;
   conn_param.private_data_len = private_data_length;
+
+  StrongAssertLogLine( conn_param.private_data_len < 56 )
+    << "it_ep_connect(): InfiniBand maximum private data length exceeded. Limit is 56, actual is " << conn_param.private_data_len
+    << EndLogLine;
 
   ret = rdma_connect(cm_conn_id, &conn_param);
   if (ret) 
@@ -2503,6 +2564,8 @@ it_status_t it_ep_connect (
         << "it_ep_connect(): ERROR: failed to connect to remote host" 
         << " ret: " << ret
         << " errno: " << errno
+        << " conn_id: " << (void*)cm_conn_id
+        << " conn_param.pdlen: " << conn_param.private_data_len
         << EndLogLine;
 
       pthread_mutex_unlock( & gITAPIFunctionMutex );
@@ -2563,6 +2626,10 @@ it_status_t it_ep_accept (
   conn_param.responder_resources = qpMgr->ep_attr.srv.rc.rdma_read_ord; // IT_RDMA_RESPONDER_RESOUCES;
   conn_param.private_data = private_data;
   conn_param.private_data_len = private_data_length;
+
+  StrongAssertLogLine( conn_param.private_data_len < 196 )
+    << "it_ep_connect(): InfiniBand maximum private data length exceeded. Limit is 196, actual is " << conn_param.private_data_len
+    << EndLogLine;
 
   int ret = rdma_accept(cm_conn_id, &conn_param);
   if( ret ) 
@@ -2768,7 +2835,6 @@ it_status_t it_lmr_free (
     {
       if( mrMgr->MRs[ i ].mr != NULL )
         {
-
           BegLogLine( FXLOG_IT_API_O_VERBS)
             << "it_lmr_free(): dereg for device: " << i
             << " mem@: " << mrMgr->addr
@@ -2992,6 +3058,7 @@ it_status_t itx_ep_accept_with_rmr (
   BegLogLine(FXLOG_IT_API_O_VERBS) << "IPaddr: " << (void*)(local_IPaddr->sin_addr.s_addr) << EndLogLine;
 
 
+  it_rmr_triplet_t private_data;
   it_api_o_verbs_qp_mgr_t* qpMgr = (it_api_o_verbs_qp_mgr_t*) ep_handle;
 
   struct rdma_cm_id *cm_conn_id = (struct rdma_cm_id *) cn_est_id;
@@ -3015,8 +3082,6 @@ it_status_t itx_ep_accept_with_rmr (
   // - make rmr private data
   if( lmr && rmr_context )
     {
-      it_rmr_triplet_t private_data;
-
       status = itx_get_rmr_context_for_ep( ep_handle,
                                            lmr->lmr,
                                            rmr_context );
@@ -3036,13 +3101,12 @@ it_status_t itx_ep_accept_with_rmr (
         << " rmr: " << (void*)*rmr_context
         << EndLogLine;
 
-      private_data.rmr      = (it_rmr_handle_t)(*rmr_context);
-      private_data.addr.abs = lmr->addr.abs;
-      private_data.length   = lmr->length;
+      private_data.rmr      = (it_rmr_handle_t) htobe64( (*rmr_context) );
+      private_data.addr.abs = (void*)htobe64( (long unsigned int) lmr->addr.abs );
+      private_data.length   = htobe64( lmr->length );
   
       conn_param.private_data = &private_data;
       conn_param.private_data_len =  sizeof(it_rmr_triplet_t);
-
     }
       
   else
@@ -3050,6 +3114,10 @@ it_status_t itx_ep_accept_with_rmr (
       conn_param.private_data_len = 0; // assume no data
       conn_param.private_data = NULL;
     }
+
+  StrongAssertLogLine( conn_param.private_data_len < 196 )
+    << "it_ep_connect(): InfiniBand maximum private data length exceeded. Limit is 196, actual is " << conn_param.private_data_len
+    << EndLogLine;
 
   int ret = rdma_accept(cm_conn_id, &conn_param);
   if( ret ) 
@@ -3145,7 +3213,7 @@ it_status_t itx_ep_connect_with_rmr (
   memset(&conn_param, 0, sizeof(conn_param));
   conn_param.initiator_depth = qpMgr->ep_attr.srv.rc.rdma_read_ird;   //IT_RDMA_INITIATOR_DEPTH;
   conn_param.responder_resources = qpMgr->ep_attr.srv.rc.rdma_read_ord; // IT_RDMA_RESPONDER_RESOUCES;
-  conn_param.retry_count = 2;
+  conn_param.retry_count = 7;
 
   unsigned char* internal_private_data = NULL;
 
@@ -3193,6 +3261,10 @@ it_status_t itx_ep_connect_with_rmr (
       conn_param.private_data = private_data;
     }
 
+  StrongAssertLogLine( conn_param.private_data_len < 56 )
+    << "it_ep_connect(): InfiniBand maximum private data length exceeded. Limit is 56, actual is " << conn_param.private_data_len
+    << EndLogLine;
+
   ret = rdma_connect(cm_conn_id, &conn_param);
   if (ret) 
     {
@@ -3200,6 +3272,8 @@ it_status_t itx_ep_connect_with_rmr (
         << "it_ep_connect(): ERROR: failed to connect to remote host" 
         << " ret: " << ret
         << " errno: " << errno
+        << " conn_id: " << (void*)cm_conn_id
+        << " conn_param.pdlen: " << conn_param.private_data_len
         << EndLogLine;
 
       if( internal_private_data )

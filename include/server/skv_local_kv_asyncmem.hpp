@@ -1,20 +1,28 @@
 /************************************************
- * Copyright (c) IBM Corp. 2013-2014
+ * Copyright (c) IBM Corp. 2014
  * All rights reserved. This program and the accompanying materials
  * are made available under the terms of the Eclipse Public License v1.0
  * which accompanies this distribution, and is available at
  * http://www.eclipse.org/legal/epl-v10.html
+ *************************************************/
+
+/*
  *
  * Contributors:
  *     lschneid - initial implementation
  *
- * Created on: Jan 13, 2014
- *************************************************/
+ * implementation of Local-KV back-end API for SKV. This is an
+ * async in-mem back-end primarily for development and testing purposes.
+ * It provides the functionality if the inmem back-end but returns
+ * results exclusively via the SKV event mechanism
+ *
+ */
 
 #ifndef SKV_LOCAL_KV_ASYNCMEM_HPP_
 #define SKV_LOCAL_KV_ASYNCMEM_HPP_
 
-#define SKV_ASYNCMEM_FREQ ( 1 << 30 )
+#include <thread>
+#include <pthread.h>
 
 #include <server/skv_server_uber_pds.hpp>
 #include <server/skv_server_partitioned_data_set_manager_if.hpp>
@@ -26,92 +34,61 @@ class skv_local_kv_asyncmem {
   skv_pds_manager_if_t mPDSManager;
   int mMyRank;
 
-  // \todo: use the arrayqueue here...
-  skv_local_kv_event_t mEventQueue[ 10 ];
-  skv_local_kv_event_t *mActiveEventQueue[ 10 ];
+  skv_local_kv_request_queue_t mRequestQueue;
+  skv_local_kv_event_queue_t mEventQueue;
 
-  int mAsyncCount;
+  std::thread *mReqProcessor;
+  volatile bool mKeepProcessing;
 
-  inline bool GoAsync()
-  {
-    mAsyncCount++;
-    return ( mAsyncCount % SKV_ASYNCMEM_FREQ != 0 );
-  }
-  skv_status_t CreateEvent( skv_local_kv_cookie_t *aCookie );
   inline skv_status_t InitKVEvent( skv_local_kv_cookie_t *aCookie,
                                    skv_status_t aRC )
   {
-    if ( GoAsync() )
-    {
-      skv_server_ccb_t *ccb = aCookie->GetEPState()->GetCommandForOrdinal( aCookie->GetOrdinal() );
-      ccb->mLocalKVrc = aRC;
+    skv_server_ccb_t *ccb = aCookie->GetEPState()->GetCommandForOrdinal( aCookie->GetOrdinal() );
+    ccb->mLocalKVrc = aRC;
 
-      return CreateEvent( aCookie );
-    }
-    else
-      return SKV_SUCCESS;
+    return mEventQueue.QueueEvent( aCookie );
   }
   inline skv_status_t InitKVEvent( skv_local_kv_cookie_t *aCookie,
                                    skv_pds_id_t aPDSId,
                                    skv_status_t aRC )
   {
-    if ( GoAsync() )
-    {
-      skv_server_ccb_t *ccb = aCookie->GetEPState()->GetCommandForOrdinal( aCookie->GetOrdinal() );
-      ccb->mLocalKVData.mPDSOpen.mPDSId = aPDSId;
-      ccb->mLocalKVrc = aRC;
+    skv_server_ccb_t *ccb = aCookie->GetEPState()->GetCommandForOrdinal( aCookie->GetOrdinal() );
+    ccb->mLocalKVData.mPDSOpen.mPDSId = aPDSId;
+    ccb->mLocalKVrc = aRC;
 
-      return CreateEvent( aCookie );
-    }
-    else
-      return SKV_SUCCESS;
+    return mEventQueue.QueueEvent( aCookie );
   }
   inline skv_status_t InitKVEvent( skv_local_kv_cookie_t *aCookie,
                                    skv_pdscntl_cmd_t aCntlCmd,
                                    skv_pds_attr_t *aPDSAttr,
                                    skv_status_t aRC )
   {
-    if( GoAsync() )
-    {
-      skv_server_ccb_t *ccb = aCookie->GetEPState()->GetCommandForOrdinal( aCookie->GetOrdinal() );
-      ccb->mLocalKVData.mPDSStat.mPDSAttr = *aPDSAttr;
-      ccb->mLocalKVData.mPDSStat.mCntlCmd = aCntlCmd;
-      ccb->mLocalKVrc = aRC;
+    skv_server_ccb_t *ccb = aCookie->GetEPState()->GetCommandForOrdinal( aCookie->GetOrdinal() );
+    ccb->mLocalKVData.mPDSStat.mPDSAttr = *aPDSAttr;
+    ccb->mLocalKVData.mPDSStat.mCntlCmd = aCntlCmd;
+    ccb->mLocalKVrc = aRC;
 
-      return CreateEvent( aCookie );
-    }
-    else
-      return SKV_SUCCESS;
+    return mEventQueue.QueueEvent( aCookie );
   }
   inline skv_status_t InitKVEvent( skv_local_kv_cookie_t *aCookie,
                                    skv_distribution_t *aDist,
                                    skv_status_t aRC )
   {
-    if( GoAsync() )
-    {
-      skv_server_ccb_t *ccb = aCookie->GetEPState()->GetCommandForOrdinal( aCookie->GetOrdinal() );
-      ccb->mLocalKVData.mDistribution.mDist = aDist;
-      ccb->mLocalKVrc = aRC;
+    skv_server_ccb_t *ccb = aCookie->GetEPState()->GetCommandForOrdinal( aCookie->GetOrdinal() );
+    ccb->mLocalKVData.mDistribution.mDist = aDist;
+    ccb->mLocalKVrc = aRC;
 
-      return CreateEvent( aCookie );
-    }
-    else
-      return SKV_SUCCESS;
+    return mEventQueue.QueueEvent( aCookie );
   }
   inline skv_status_t InitKVEvent( skv_local_kv_cookie_t *aCookie,
                                    skv_lmr_triplet_t *aValueRepInStore,
                                    skv_status_t aRC )
   {
-    if( GoAsync() )
-    {
-      skv_server_ccb_t *ccb = aCookie->GetEPState()->GetCommandForOrdinal( aCookie->GetOrdinal() );
-      ccb->mLocalKVData.mLookup.mValueRepInStore = *aValueRepInStore;
-      ccb->mLocalKVrc = aRC;
+    skv_server_ccb_t *ccb = aCookie->GetEPState()->GetCommandForOrdinal( aCookie->GetOrdinal() );
+    ccb->mLocalKVData.mLookup.mValueRepInStore = *aValueRepInStore;
+    ccb->mLocalKVrc = aRC;
 
-      return CreateEvent( aCookie );
-    }
-    else
-      return SKV_SUCCESS;
+    return mEventQueue.QueueEvent( aCookie );
   }
   inline skv_status_t InitKVEvent( skv_local_kv_cookie_t *aCookie,
                                    skv_lmr_triplet_t *aKeysSizesSegs,
@@ -119,57 +96,42 @@ class skv_local_kv_asyncmem {
                                    int aKeysSizesSegsCount,
                                    skv_status_t aRC )
   {
-    if( GoAsync() )
-    {
-      skv_server_ccb_t *ccb = aCookie->GetEPState()->GetCommandForOrdinal( aCookie->GetOrdinal() );
-      ccb->mLocalKVData.mRetrieveNKeys.mKeysSizesSegs= aKeysSizesSegs;
-      ccb->mLocalKVData.mRetrieveNKeys.mKeysCount = aKeysCount;
-      ccb->mLocalKVData.mRetrieveNKeys.mKeysSizesSegsCount = aKeysSizesSegsCount;
-      ccb->mLocalKVrc = aRC;
+    skv_server_ccb_t *ccb = aCookie->GetEPState()->GetCommandForOrdinal( aCookie->GetOrdinal() );
+    ccb->mLocalKVData.mRetrieveNKeys.mKeysSizesSegs= aKeysSizesSegs;
+    ccb->mLocalKVData.mRetrieveNKeys.mKeysCount = aKeysCount;
+    ccb->mLocalKVData.mRetrieveNKeys.mKeysSizesSegsCount = aKeysSizesSegsCount;
+    ccb->mLocalKVrc = aRC;
 
-      return CreateEvent( aCookie );
-    }
-    else
-      return SKV_SUCCESS;
+    return mEventQueue.QueueEvent( aCookie );
   }
   inline skv_status_t InitKVRDMAEvent( skv_local_kv_cookie_t *aCookie,
                                        skv_lmr_triplet_t *aValueRDMADest,
                                        skv_status_t aRC )
   {
-    if( GoAsync() )
-    {
-      skv_server_ccb_t *ccb = aCookie->GetEPState()->GetCommandForOrdinal( aCookie->GetOrdinal() );
-      skv_local_kv_req_ctx_t ReqCtx(0);
+    skv_server_ccb_t *ccb = aCookie->GetEPState()->GetCommandForOrdinal( aCookie->GetOrdinal() );
+    skv_local_kv_req_ctx_t ReqCtx(0);
 
-      ccb->mLocalKVData.mRDMA.mValueRDMADest= *aValueRDMADest;
-      ccb->mLocalKVData.mRDMA.mReqCtx = ReqCtx;
-      ccb->mLocalKVData.mRDMA.mSize = 0;
-      ccb->mLocalKVrc = aRC;
+    ccb->mLocalKVData.mRDMA.mValueRDMADest= *aValueRDMADest;
+    ccb->mLocalKVData.mRDMA.mReqCtx = ReqCtx;
+    ccb->mLocalKVData.mRDMA.mSize = 0;
+    ccb->mLocalKVrc = aRC;
 
-      return CreateEvent( aCookie );
-    }
-    else
-      return SKV_SUCCESS;
+    return mEventQueue.QueueEvent( aCookie );
   }
   inline skv_status_t InitKVRDMAEvent( skv_local_kv_cookie_t *aCookie,
                                        skv_lmr_triplet_t *aValueRDMADest,
                                        int aValueSize,
                                        skv_status_t aRC )
   {
-    if( GoAsync() )
-    {
-      skv_server_ccb_t *ccb = aCookie->GetEPState()->GetCommandForOrdinal( aCookie->GetOrdinal() );
-      skv_local_kv_req_ctx_t ReqCtx(0);
+    skv_server_ccb_t *ccb = aCookie->GetEPState()->GetCommandForOrdinal( aCookie->GetOrdinal() );
+    skv_local_kv_req_ctx_t ReqCtx(0);
 
-      ccb->mLocalKVData.mRDMA.mValueRDMADest= *aValueRDMADest;
-      ccb->mLocalKVData.mRDMA.mReqCtx = ReqCtx;
-      ccb->mLocalKVData.mRDMA.mSize = aValueSize,
-      ccb->mLocalKVrc = aRC;
+    ccb->mLocalKVData.mRDMA.mValueRDMADest= *aValueRDMADest;
+    ccb->mLocalKVData.mRDMA.mReqCtx = ReqCtx;
+    ccb->mLocalKVData.mRDMA.mSize = aValueSize;
+    ccb->mLocalKVrc = aRC;
 
-      return CreateEvent( aCookie );
-    }
-    else
-      return SKV_SUCCESS;
+    return mEventQueue.QueueEvent( aCookie );
   }
 
 public:
@@ -181,8 +143,14 @@ public:
 
   skv_status_t Exit();
 
-  skv_local_kv_event_t* GetEvent();
-  skv_status_t AckEvent( skv_local_kv_event_t *aEvent );
+  skv_local_kv_event_t* GetEvent()
+  {
+    return mEventQueue.GetEvent();
+  }
+  skv_status_t AckEvent( skv_local_kv_event_t *aEvent )
+  {
+    return mEventQueue.AckEvent( aEvent );
+  }
 
   skv_status_t CancelContext( skv_local_kv_req_ctx_t *aReqCtx );
 
@@ -274,6 +242,27 @@ public:
                              skv_local_kv_cookie_t *aCookie );
 
   skv_status_t DumpImage( char* aCheckpointPath );
+
+  /* NON-BACK-END API functions */
+  bool KeepProcessing()
+  {
+    return mKeepProcessing;
+  }
+
+  skv_local_kv_request_queue_t* GetRequestQueue()
+  {
+    return &mRequestQueue;
+  }
+  skv_status_t PerformOpen( skv_local_kv_request_t *aReq );
+  skv_status_t PerformGetDistribution(skv_local_kv_request_t *aReq );
+  skv_status_t PerformStat( skv_local_kv_request_t *aReq );
+  skv_status_t PerformClose( skv_local_kv_request_t *aReq );
+  skv_status_t PerformInsert( skv_local_kv_request_t *aReq );
+  skv_status_t PerformLookup( skv_local_kv_request_t *aReq );
+  skv_status_t PerformRetrieve( skv_local_kv_request_t *aReq );
+  skv_status_t PerformBulkInsert( skv_local_kv_request_t *aReq );
+  skv_status_t PerformRemove( skv_local_kv_request_t *aReq );
+  skv_status_t PerformRetrieveNKeys( skv_local_kv_request_t *aReq );
 
 };
 

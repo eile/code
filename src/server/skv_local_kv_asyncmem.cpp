@@ -1,25 +1,31 @@
 /************************************************
- * Copyright (c) IBM Corp. 2013-2014
+ * Copyright (c) IBM Corp. 2014
  * All rights reserved. This program and the accompanying materials
  * are made available under the terms of the Eclipse Public License v1.0
  * which accompanies this distribution, and is available at
  * http://www.eclipse.org/legal/epl-v10.html
- *
+ *************************************************/
+
+/*
  * Contributors:
  *     lschneid - initial implementation
- *
- * Created on: Jan 13, 2014
- *************************************************/
+ */
 
 #ifndef SKV_LOCAL_KV_BACKEND_LOG
 #define SKV_LOCAL_KV_BACKEND_LOG ( 0 | SKV_LOGGING_ALL )
+#endif
+
+#ifndef SKV_LOCAL_KV_ASYNCMEM_PROCESSING_LOG
+#define SKV_LOCAL_KV_ASYNCMEM_PROCESSING_LOG ( 0 | SKV_LOGGING_ALL )
 #endif
 
 #ifndef SKV_SERVER_INSERT_TRACE
 #define SKV_SERVER_INSERT_TRACE ( 0 )
 #endif
 
+#include <unistd.h>
 #include <common/skv_types.hpp>
+#include <common/skv_mutex.hpp>
 #include <utils/skv_trace_clients.hpp>
 
 #include <common/skv_client_server_headers.hpp>
@@ -28,7 +34,78 @@
 #include <server/skv_server_types.hpp>
 
 #include <server/skv_local_kv_types.hpp>
+#include <server/skv_local_kv_request.hpp>
+#include <server/skv_local_kv_request_queue.hpp>
+#include <server/skv_local_kv_event_queue.hpp>
+
 #include <server/skv_local_kv_asyncmem.hpp>
+
+static
+void AsyncProcessing( skv_local_kv_asyncmem *aBackEnd )
+{
+  BegLogLine( SKV_LOCAL_KV_ASYNCMEM_PROCESSING_LOG )
+    << "AsyncProcessing: Entering thread"
+    << EndLogLine;
+
+  skv_local_kv_request_queue_t* RequestQueue = aBackEnd->GetRequestQueue();
+  while( aBackEnd->KeepProcessing() )
+  {
+    skv_status_t status;
+    skv_local_kv_request_t *nextRequest = RequestQueue->GetRequest();
+    if( nextRequest )
+    {
+      BegLogLine( SKV_LOCAL_KV_ASYNCMEM_PROCESSING_LOG )
+        << "Fetched LocalKV request: " << skv_local_kv_request_type_to_string( nextRequest->mType )
+        << EndLogLine;
+
+      switch( nextRequest->mType )
+      {
+        case SKV_LOCAL_KV_REQUEST_TYPE_OPEN:
+          status = aBackEnd->PerformOpen( nextRequest );
+          break;
+        case SKV_LOCAL_KV_REQUEST_TYPE_INFO:
+          status = aBackEnd->PerformStat( nextRequest );
+          break;
+        case SKV_LOCAL_KV_REQUEST_TYPE_CLOSE:
+          status = aBackEnd->PerformClose( nextRequest );
+          break;
+        case SKV_LOCAL_KV_REQUEST_TYPE_GET_DISTRIBUTION:
+          status = aBackEnd->PerformGetDistribution( nextRequest );
+          break;
+        case SKV_LOCAL_KV_REQUEST_TYPE_INSERT:
+          status = aBackEnd->PerformInsert( nextRequest );
+          break;
+        case SKV_LOCAL_KV_REQUEST_TYPE_LOOKUP:
+          status = aBackEnd->PerformLookup( nextRequest );
+          break;
+        case SKV_LOCAL_KV_REQUEST_TYPE_RETRIEVE:
+          status = aBackEnd->PerformRetrieve( nextRequest );
+          break;
+        case SKV_LOCAL_KV_REQUEST_TYPE_REMOVE:
+          status = aBackEnd->PerformRemove( nextRequest );
+          break;
+        case SKV_LOCAL_KV_REQUEST_TYPE_BULK_INSERT:
+          status = aBackEnd->PerformBulkInsert( nextRequest );
+          break;
+        case SKV_LOCAL_KV_REQUEST_TYPE_RETRIEVE_N:
+          status = aBackEnd->PerformRetrieveNKeys( nextRequest );
+          break;
+        case SKV_LOCAL_KV_REQUEST_TYPE_UNKNOWN:
+        default:
+          StrongAssertLogLine( 1 )
+            << "skv_local_kv_asyncmem:AsyncProcessing(): ERROR, unknown/unexpected Request type: " << (int)nextRequest->mType
+            << EndLogLine;
+      }
+      RequestQueue->AckRequest( nextRequest );
+    }
+    else
+      usleep(10);
+  }
+
+  BegLogLine( SKV_LOCAL_KV_ASYNCMEM_PROCESSING_LOG )
+    << "AsyncProcessing: Exiting thread"
+    << EndLogLine;
+}
 
 skv_status_t
 skv_local_kv_asyncmem::Init( int aRank,
@@ -39,22 +116,17 @@ skv_local_kv_asyncmem::Init( int aRank,
 {
   skv_status_t status;
   mMyRank = aRank;
-  mAsyncCount = 0;
 
-  for( int i=0; i<10; i++ )
-  {
-    mEventQueue[ i ].mType = SKV_SERVER_EVENT_TYPE_NONE;
-    mEventQueue[ i ].mCookie = NULL;
-    mActiveEventQueue[ i ] = NULL;
-  }
-
-  /************************************************************
-   * Initialize the local partition dataset manager
-   ***********************************************************/
   BegLogLine( SKV_LOCAL_KV_BACKEND_LOG )
     << "skv_local_kv_asyncmem::Init(): Entering..."
     << EndLogLine;
 
+  mEventQueue.Init();
+  mRequestQueue.Init();
+
+  /************************************************************
+   * Initialize the local partition dataset manager
+   ***********************************************************/
   status = mPDSManager.Init( aRank,
                              aNodeCount,
                              aInternalEventMgr,
@@ -67,37 +139,18 @@ skv_local_kv_asyncmem::Init( int aRank,
     << " PartitionSize: " << aNodeCount
     << EndLogLine;
   /***********************************************************/
+
+  mKeepProcessing = true;
+  mReqProcessor = new std::thread(AsyncProcessing, this );
+
   return status;
 }
 
 skv_status_t
 skv_local_kv_asyncmem::Exit()
 {
+  mKeepProcessing = false;
   return mPDSManager.Finalize();
-}
-
-skv_local_kv_event_t*
-skv_local_kv_asyncmem::GetEvent()
-{
-  //  this kv backend doesn't create events
-  skv_local_kv_event_t *Event = mActiveEventQueue[ 0 ];
-  if( Event != NULL )
-  {
-    BegLogLine( SKV_LOCAL_KV_BACKEND_LOG )
-      << "skv_local_kv_asyncmem::GetEvent(): Event fetched"
-      << " @" << (void*)Event
-      << " type: " << skv_server_event_type_to_string( Event->mType )
-      << EndLogLine;
-    mActiveEventQueue[ 0 ] = NULL;
-  }
-
-  return Event;
-}
-
-skv_status_t
-skv_local_kv_asyncmem::AckEvent( skv_local_kv_event_t *aEvent )
-{
-  return SKV_SUCCESS;
 }
 
 skv_status_t
@@ -107,20 +160,39 @@ skv_local_kv_asyncmem::CancelContext( skv_local_kv_req_ctx_t *aReqCtx )
   return SKV_SUCCESS;
 }
 
+
 skv_status_t
 skv_local_kv_asyncmem::GetDistribution(skv_distribution_t **aDist,
                                        skv_local_kv_cookie_t *aCookie )
 {
+  skv_local_kv_request_t *kvReq = mRequestQueue.AcquireRequestEntry();
+  if( !kvReq )
+    return SKV_ERRNO_COMMAND_LIMIT_REACHED;
+
+  kvReq->InitCommon( SKV_LOCAL_KV_REQUEST_TYPE_GET_DISTRIBUTION, aCookie );
+  // getdistribution doesn't have further parameters
+
+  mRequestQueue.QueueRequest( kvReq );
+  return SKV_ERRNO_LOCAL_KV_EVENT;
+}
+
+skv_status_t
+skv_local_kv_asyncmem::PerformGetDistribution(skv_local_kv_request_t *aReq )
+{
+  skv_status_t status = SKV_SUCCESS;
   skv_distribution_t *dist = mPDSManager.GetDistribution();
   if( dist == NULL )
-  {
-    *aDist = NULL;
-    return SKV_ERRNO_NO_BUFFER_AVAILABLE;
-  }
+    status = SKV_ERRNO_NO_BUFFER_AVAILABLE;
 
-  skv_status_t status = InitKVEvent( aCookie, dist, status );
+  BegLogLine(1)
+    << "GET_DIST REQUEST"
+    << " dist:" << (void*)dist
+    << EndLogLine;
+
+  status = InitKVEvent( aReq->mCookie, dist, status );
   return status;
 }
+
 
 skv_status_t
 skv_local_kv_asyncmem::PDS_Open( char *aPDSName,
@@ -129,38 +201,108 @@ skv_local_kv_asyncmem::PDS_Open( char *aPDSName,
                                  skv_pds_id_t *aPDSId,
                                  skv_local_kv_cookie_t *aCookie )
 {
-  skv_status_t status = mPDSManager.Open( aPDSName,
-                                          aPrivs,
-                                          aFlags,
-                                          aPDSId );
+  skv_local_kv_request_t *kvReq = mRequestQueue.AcquireRequestEntry();
+  if( !kvReq )
+    return SKV_ERRNO_COMMAND_LIMIT_REACHED;
 
-  if( status != SKV_SUCCESS )
-    return status;
+  kvReq->InitCommon( SKV_LOCAL_KV_REQUEST_TYPE_OPEN, aCookie );
+  memcpy( &kvReq->mData[ 0 ], aPDSName, SKV_MAX_PDS_NAME_SIZE );
+  kvReq->mRequest.mOpen.mPDSName = &kvReq->mData[ 0 ];
+  kvReq->mRequest.mOpen.mPrivs = aPrivs;
+  kvReq->mRequest.mOpen.mFlags = aFlags;
 
-  status = InitKVEvent( aCookie, *aPDSId, status );
-  return status;
+  mRequestQueue.QueueRequest( kvReq );
+
+  BegLogLine( SKV_LOCAL_KV_BACKEND_LOG )
+    << "skv_local_kv_asyncmem: Open Request stored:"
+    << " PDSName:" << kvReq->mRequest.mOpen.mPDSName
+    << " Priv:" << kvReq->mRequest.mOpen.mPrivs
+    << " Flags: " << kvReq->mRequest.mOpen.mFlags
+    << EndLogLine;
+
+  return SKV_ERRNO_LOCAL_KV_EVENT;
 }
 
 skv_status_t
-skv_local_kv_asyncmem::PDS_Stat( skv_pdscntl_cmd_t aCmd,
-                              skv_pds_attr_t *aPDSAttr,
-                              skv_local_kv_cookie_t *aCookie )
+skv_local_kv_asyncmem::PerformOpen( skv_local_kv_request_t *aReq )
 {
-  skv_status_t status = mPDSManager.Stat( aCmd, aPDSAttr );
-  if( status != SKV_SUCCESS )
-    return status;
-  status = InitKVEvent( aCookie, aCmd, aPDSAttr, status );
+  skv_pds_id_t PDSId;
+  BegLogLine( SKV_LOCAL_KV_BACKEND_LOG )
+    << "OPEN REQUEST"
+    << " PDSName:" << aReq->mRequest.mOpen.mPDSName
+    << " Priv:" << aReq->mRequest.mOpen.mPrivs
+    << " Flags: " << aReq->mRequest.mOpen.mFlags
+    << EndLogLine;
+  skv_status_t status = mPDSManager.Open( aReq->mRequest.mOpen.mPDSName,
+                                          aReq->mRequest.mOpen.mPrivs,
+                                          aReq->mRequest.mOpen.mFlags,
+                                          &PDSId );
+  BegLogLine(1)
+    << "OPEN REQUEST COMPLETE"
+    << EndLogLine;
+
+  status = InitKVEvent( aReq->mCookie, PDSId, status );
   return status;
 }
+
+
+skv_status_t
+skv_local_kv_asyncmem::PDS_Stat( skv_pdscntl_cmd_t aCmd,
+                                 skv_pds_attr_t *aPDSAttr,
+                                 skv_local_kv_cookie_t *aCookie )
+{
+  skv_local_kv_request_t *kvReq = mRequestQueue.AcquireRequestEntry();
+  if( !kvReq )
+    return SKV_ERRNO_COMMAND_LIMIT_REACHED;
+
+  kvReq->InitCommon( SKV_LOCAL_KV_REQUEST_TYPE_INFO, aCookie );
+  kvReq->mRequest.mStat.mCmd = aCmd;
+  memcpy( &kvReq->mData[ 0 ], aPDSAttr, sizeof( skv_pds_attr_t ) );
+  kvReq->mRequest.mStat.mPDSAttr = (skv_pds_attr_t*)&kvReq->mData[ 0 ];
+
+  mRequestQueue.QueueRequest( kvReq );
+
+  return SKV_ERRNO_LOCAL_KV_EVENT;
+}
+
+skv_status_t
+skv_local_kv_asyncmem::PerformStat( skv_local_kv_request_t *aReq )
+{
+  skv_status_t status = mPDSManager.Stat( aReq->mRequest.mStat.mCmd, aReq->mRequest.mStat.mPDSAttr );
+  status = InitKVEvent( aReq->mCookie, aReq->mRequest.mStat.mCmd, aReq->mRequest.mStat.mPDSAttr, status );
+  return status;
+}
+
 
 skv_status_t
 skv_local_kv_asyncmem::PDS_Close( skv_pds_attr_t *aPDSAttr,
                                skv_local_kv_cookie_t *aCookie )
 {
-  return mPDSManager.Close( aPDSAttr );
+  skv_local_kv_request_t *kvReq = mRequestQueue.AcquireRequestEntry();
+  if( !kvReq )
+    return SKV_ERRNO_COMMAND_LIMIT_REACHED;
+
+  kvReq->InitCommon( SKV_LOCAL_KV_REQUEST_TYPE_CLOSE, aCookie );
+  kvReq->mRequest.mStat.mCmd = SKV_PDSCNTL_CMD_CLOSE;
+  memcpy( &kvReq->mData[ 0 ], aPDSAttr, sizeof( skv_pds_attr_t ) );
+  kvReq->mRequest.mStat.mPDSAttr = (skv_pds_attr_t*)&kvReq->mData[ 0 ];
+
+  mRequestQueue.QueueRequest( kvReq );
+  return SKV_ERRNO_LOCAL_KV_EVENT;
+}
+
+skv_status_t
+skv_local_kv_asyncmem::PerformClose( skv_local_kv_request_t *aReq )
+{
+  skv_status_t status = mPDSManager.Close( aReq->mRequest.mStat.mPDSAttr );
+  status = InitKVEvent( aReq->mCookie, aReq->mRequest.mStat.mCmd, aReq->mRequest.mStat.mPDSAttr, status );
+  return status;
 }
 
 
+/******************************************************
+ * insertion helper functions
+ */
 static inline
 skv_status_t
 AllocateAndMoveKey( skv_cmd_RIU_req_t *aReq,
@@ -251,8 +393,9 @@ InsertLocal( skv_cmd_RIU_req_t *aReq,
 
   return status;
 }
-
-
+/******************************************************
+ * END: insertion helper functions
+ */
 
 skv_status_t
 skv_local_kv_asyncmem::Insert( skv_cmd_RIU_req_t *aReq,
@@ -261,11 +404,34 @@ skv_local_kv_asyncmem::Insert( skv_cmd_RIU_req_t *aReq,
                             skv_lmr_triplet_t *aValueRDMADest,
                             skv_local_kv_cookie_t *aCookie )
 {
-  skv_status_t status = SKV_ERRNO_UNSPECIFIED_ERROR;
+  skv_local_kv_request_t *kvReq = mRequestQueue.AcquireRequestEntry();
+  if( !kvReq )
+    return SKV_ERRNO_COMMAND_LIMIT_REACHED;
 
-  int KeySize = aReq->mKeyValue.mKeySize;
-  int ValueSize = aReq->mKeyValue.mValueSize;
-  int TotalValueSize = ValueSize + aReq->mOffset;
+  kvReq->InitCommon( SKV_LOCAL_KV_REQUEST_TYPE_INSERT, aCookie );
+  memcpy( &kvReq->mData[ 0 ],
+          aReq,
+          SKV_CONTROL_MESSAGE_SIZE );
+  kvReq->mRequest.mInsert.mReqData = (skv_cmd_RIU_req_t*)&kvReq->mData[ 0 ];
+  kvReq->mRequest.mInsert.mCmdStatus = aCmdStatus;
+  kvReq->mRequest.mInsert.mStoredValueRep = *aStoredValueRep;
+
+  mRequestQueue.QueueRequest( kvReq );
+  return SKV_ERRNO_LOCAL_KV_EVENT;
+}
+
+skv_status_t
+skv_local_kv_asyncmem::PerformInsert( skv_local_kv_request_t *aKVReq )
+{
+  skv_status_t status = SKV_ERRNO_UNSPECIFIED_ERROR;
+  skv_status_t CmdStatus = aKVReq->mRequest.mInsert.mCmdStatus;
+  skv_cmd_RIU_req_t *Req = aKVReq->mRequest.mInsert.mReqData;
+  skv_lmr_triplet_t *StoredValueRep = &aKVReq->mRequest.mInsert.mStoredValueRep;
+  skv_lmr_triplet_t ValueRDMADest;
+
+  int KeySize = Req->mKeyValue.mKeySize;
+  int ValueSize = Req->mKeyValue.mValueSize;
+  int TotalValueSize = ValueSize + Req->mOffset;
 
   AssertLogLine( TotalValueSize >= 0 &&
                  TotalValueSize < SKV_VALUE_LIMIT )
@@ -278,21 +444,22 @@ skv_local_kv_asyncmem::Insert( skv_cmd_RIU_req_t *aReq,
 
   BegLogLine( SKV_LOCAL_KV_BACKEND_LOG)
     << "skv_local_kv_asyncmem::Insert():: Entering with: "
+    << " Key: " << *(int*)(Req->mKeyValue.mData)
     << " KeySize: " << KeySize
     << " ValueSize: " << ValueSize
     << " TotalValueSize: " << TotalValueSize
     << " KeyValueSize: " << KeyValueSize
-    << " Flags: " << (void*)aReq->mFlags
+    << " Flags: " << (void*)Req->mFlags
     << EndLogLine;
 
-  int LocalValueSize = aStoredValueRep->GetLen();
+  int LocalValueSize = StoredValueRep->GetLen();
 
   /********************************************************
    * Record Exists
    ********************************************************/
-  if( aCmdStatus == SKV_SUCCESS )
+  if( CmdStatus == SKV_SUCCESS )
   {
-    switch( aReq->mFlags & (SKV_COMMAND_RIU_INSERT_EXPANDS_VALUE
+    switch( Req->mFlags & (SKV_COMMAND_RIU_INSERT_EXPANDS_VALUE
         | SKV_COMMAND_RIU_INSERT_OVERWRITE_VALUE_ON_DUP
         | SKV_COMMAND_RIU_UPDATE
         | SKV_COMMAND_RIU_APPEND) )
@@ -305,7 +472,7 @@ skv_local_kv_asyncmem::Insert( skv_cmd_RIU_req_t *aReq,
         BegLogLine( SKV_LOCAL_KV_BACKEND_LOG )
             << "skv_local_kv_asyncmem::Insert():: OVERWRITE_ON_DUP"
             << " ValueSize: " << ValueSize
-            << " offs: " << aReq->mOffset
+            << " offs: " << Req->mOffset
             << EndLogLine;
 
         if( LocalValueSize < TotalValueSize )
@@ -314,9 +481,9 @@ skv_local_kv_asyncmem::Insert( skv_cmd_RIU_req_t *aReq,
           break;
         }
 
-        aValueRDMADest->InitAbs( aStoredValueRep->GetLMRHandle(),
-                                 (char *) aStoredValueRep->GetAddr() + aReq->mOffset,
-                                 ValueSize );
+        ValueRDMADest.InitAbs( StoredValueRep->GetLMRHandle(),
+                               (char *) StoredValueRep->GetAddr() + Req->mOffset,
+                               ValueSize );
         status = SKV_SUCCESS;
         break;
 
@@ -337,11 +504,11 @@ skv_local_kv_asyncmem::Insert( skv_cmd_RIU_req_t *aReq,
 
         if( TotalValueSize > LocalValueSize )
         {
-          if( !(aReq->mFlags & SKV_COMMAND_RIU_INSERT_OVERLAPPING) )
+          if( !(Req->mFlags & SKV_COMMAND_RIU_INSERT_OVERLAPPING) )
           {
             BegLogLine( SKV_LOCAL_KV_BACKEND_LOG )
               << "skv_local_kv_asyncmem::Insert():: overlapping inserts not allowed "
-              << " Req->mOffset: " << aReq->mOffset
+              << " Req->mOffset: " << Req->mOffset
               << " LocalValueSize: " << LocalValueSize
               << " requires: SKV_COMMAND_RIU_INSERT_OVERLAPPING to be set"
               << EndLogLine;
@@ -356,7 +523,7 @@ skv_local_kv_asyncmem::Insert( skv_cmd_RIU_req_t *aReq,
           // Allocate new
           skv_lmr_triplet_t NewRecordAllocRep;
 
-          status = AllocateAndMoveKey( aReq,
+          status = AllocateAndMoveKey( Req,
                                        KeyValueSize,
                                        &NewRecordAllocRep,
                                        &mPDSManager );
@@ -368,24 +535,24 @@ skv_local_kv_asyncmem::Insert( skv_cmd_RIU_req_t *aReq,
           char* RecordPtr = (char *) NewRecordAllocRep.GetAddr() + KeySize;
 
           memcpy( RecordPtr,
-                  (void *) aStoredValueRep->GetAddr(),
+                  (void *) StoredValueRep->GetAddr(),
                   LocalValueSize );
 
-          RecordPtr += aReq->mOffset;   // LocalValueSize;
+          RecordPtr += Req->mOffset;   // LocalValueSize;
 
           // Prepare LMR to cover the new to read fraction of the value only
-          aValueRDMADest->InitAbs( NewRecordAllocRep.GetLMRHandle(),
-                                   RecordPtr,
-                                   ValueSize );
+          ValueRDMADest.InitAbs( NewRecordAllocRep.GetLMRHandle(),
+                                 RecordPtr,
+                                 ValueSize );
 
           // Remove old record and deallocate space
-          status = RemoveLocal( aReq,
+          status = RemoveLocal( Req,
                                 KeySize,
-                                (char *) aStoredValueRep->GetAddr(),
+                                (char *) StoredValueRep->GetAddr(),
                                 &mPDSManager );
 
           // insert new record
-          status = InsertLocal( aReq,
+          status = InsertLocal( Req,
                                 (char *) NewRecordAllocRep.GetAddr(),
                                 KeySize,
                                 TotalValueSize,
@@ -400,9 +567,9 @@ skv_local_kv_asyncmem::Insert( skv_cmd_RIU_req_t *aReq,
           // Just make sure that the rdma_read is done to the
           // appropriate offset
 
-          aValueRDMADest->InitAbs( aStoredValueRep->GetLMRHandle(),
-                                   (char *) aStoredValueRep->GetAddr() + aReq->mOffset,
-                                   ValueSize );
+          ValueRDMADest.InitAbs( StoredValueRep->GetLMRHandle(),
+                                 (char *) StoredValueRep->GetAddr() + Req->mOffset,
+                                 ValueSize );
           status = SKV_SUCCESS;
         }
 
@@ -416,17 +583,17 @@ skv_local_kv_asyncmem::Insert( skv_cmd_RIU_req_t *aReq,
 
         // if the new size is exactly the previous size, there's nothing to adjust
         // just make sure the LMR is pointing to the right location
-        if( ValueSize == aStoredValueRep->GetLen() )
+        if( ValueSize == StoredValueRep->GetLen() )
         {
           BegLogLine( SKV_LOCAL_KV_BACKEND_LOG )
             << "skv_local_kv_asyncmem::Insert():: UPDATE same length record, overwriting..."
             << " ValueSize: " << ValueSize
-            << " offs: " << aReq->mOffset
+            << " offs: " << Req->mOffset
             << EndLogLine;
 
-          aValueRDMADest->InitAbs( aStoredValueRep->GetLMRHandle(),
-                                   (char *) aStoredValueRep->GetAddr() + aReq->mOffset,
-                                   ValueSize );
+          ValueRDMADest.InitAbs( StoredValueRep->GetLMRHandle(),
+                                 (char *) StoredValueRep->GetAddr() + Req->mOffset,
+                                 ValueSize );
           status = SKV_SUCCESS;
         }
         // reallocate, copy and insert new updated record, if the size is different
@@ -435,17 +602,17 @@ skv_local_kv_asyncmem::Insert( skv_cmd_RIU_req_t *aReq,
           BegLogLine( SKV_LOCAL_KV_BACKEND_LOG )
             << "skv_local_kv_asyncmem::Insert():: UPDATE different length record, reallocating..."
             << " ValueSize: " << ValueSize
-            << " offs: " << aReq->mOffset
+            << " offs: " << Req->mOffset
             << EndLogLine;
 
-          status = RemoveLocal( aReq,
+          status = RemoveLocal( Req,
                                 KeySize,
-                                (char *) aStoredValueRep->GetAddr(),
+                                (char *) StoredValueRep->GetAddr(),
                                 &mPDSManager );
 
           skv_lmr_triplet_t NewRecordAllocRep;
 
-          status = AllocateAndMoveKey( aReq,
+          status = AllocateAndMoveKey( Req,
                                        KeyValueSize,
                                        &NewRecordAllocRep,
                                        &mPDSManager );
@@ -453,11 +620,11 @@ skv_local_kv_asyncmem::Insert( skv_cmd_RIU_req_t *aReq,
           if( status != SKV_SUCCESS )
             break;
 
-          aValueRDMADest->InitAbs( NewRecordAllocRep.GetLMRHandle(),
-                                   (char *) NewRecordAllocRep.GetAddr() + KeySize + aReq->mOffset,
-                                   ValueSize );
+          ValueRDMADest.InitAbs( NewRecordAllocRep.GetLMRHandle(),
+                                 (char *) NewRecordAllocRep.GetAddr() + KeySize + Req->mOffset,
+                                 ValueSize );
 
-          status = InsertLocal( aReq,
+          status = InsertLocal( Req,
                                 (char *) NewRecordAllocRep.GetAddr(),
                                 KeySize,
                                 TotalValueSize,
@@ -492,7 +659,7 @@ skv_local_kv_asyncmem::Insert( skv_cmd_RIU_req_t *aReq,
           // Allocate new
           skv_lmr_triplet_t NewRecordAllocRep;
 
-          status = AllocateAndMoveKey( aReq,
+          status = AllocateAndMoveKey( Req,
                                        KeyValueSize,
                                        &NewRecordAllocRep,
                                        &mPDSManager );
@@ -503,23 +670,23 @@ skv_local_kv_asyncmem::Insert( skv_cmd_RIU_req_t *aReq,
           char* RecordPtr = (char *) NewRecordAllocRep.GetAddr() + KeySize;
 
           memcpy( RecordPtr,
-                  (void *) aStoredValueRep->GetAddr(),
+                  (void *) StoredValueRep->GetAddr(),
                   LocalValueSize );
 
           // setup to add new record
           RecordPtr += LocalValueSize;
 
           // rdma read only the new record data
-          aValueRDMADest->InitAbs( NewRecordAllocRep.GetLMRHandle(),
-                                   RecordPtr,
-                                   ValueSize );
+          ValueRDMADest.InitAbs( NewRecordAllocRep.GetLMRHandle(),
+                                 RecordPtr,
+                                 ValueSize );
 
-          status = RemoveLocal( aReq,
+          status = RemoveLocal( Req,
                                 KeySize,
-                                (char *) aStoredValueRep->GetAddr(),
+                                (char *) StoredValueRep->GetAddr(),
                                 &mPDSManager );
 
-          status = InsertLocal( aReq,
+          status = InsertLocal( Req,
                                 (char *) NewRecordAllocRep.GetAddr(),
                                 KeySize,
                                 TotalValueSize,
@@ -538,9 +705,9 @@ skv_local_kv_asyncmem::Insert( skv_cmd_RIU_req_t *aReq,
           // Just make sure that the rdma_read is done to the
           // appropriate offset
 
-          aValueRDMADest->InitAbs( aStoredValueRep->GetLMRHandle(),
-                                   (char *) aStoredValueRep->GetAddr() + aReq->mOffset,
-                                   ValueSize );
+          ValueRDMADest.InitAbs( StoredValueRep->GetLMRHandle(),
+                                 (char *) StoredValueRep->GetAddr() + Req->mOffset,
+                                 ValueSize );
         }
 
         break;
@@ -575,10 +742,10 @@ skv_local_kv_asyncmem::Insert( skv_cmd_RIU_req_t *aReq,
 
     BegLogLine( SKV_LOCAL_KV_BACKEND_LOG)
       << "skv_local_kv_asyncmem::Insert():: "
-      << " Req->mKeyValue: " << aReq->mKeyValue
+      << " Req->mKeyValue: " << Req->mKeyValue
       << EndLogLine;
 
-    status = AllocateAndMoveKey( aReq,
+    status = AllocateAndMoveKey( Req,
                                  KeyValueSize,
                                  &NewRecordAllocRep,
                                  &mPDSManager );
@@ -586,17 +753,17 @@ skv_local_kv_asyncmem::Insert( skv_cmd_RIU_req_t *aReq,
     if( status == SKV_SUCCESS )
     {
       // if no EXPAND requested the requested offset has to be 0
-      if( !(aReq->mFlags & SKV_COMMAND_RIU_INSERT_EXPANDS_VALUE) )
-        AssertLogLine( aReq->mOffset == 0 )
+      if( !(Req->mFlags & SKV_COMMAND_RIU_INSERT_EXPANDS_VALUE) )
+        AssertLogLine( Req->mOffset == 0 )
           << "skv_local_kv_asyncmem::Insert():: ERROR: "
-          << " Req->mOffset: " << aReq->mOffset
+          << " Req->mOffset: " << Req->mOffset
           << EndLogLine;
 
-      aValueRDMADest->InitAbs( NewRecordAllocRep.GetLMRHandle(),
-                               (char *) NewRecordAllocRep.GetAddr() + KeySize + aReq->mOffset,
-                               ValueSize );
+      ValueRDMADest.InitAbs( NewRecordAllocRep.GetLMRHandle(),
+                             (char *) NewRecordAllocRep.GetAddr() + KeySize + Req->mOffset,
+                             ValueSize );
 
-      status = InsertLocal( aReq,
+      status = InsertLocal( Req,
                             (char *) NewRecordAllocRep.GetAddr(),
                             KeySize,
                             TotalValueSize,
@@ -608,20 +775,20 @@ skv_local_kv_asyncmem::Insert( skv_cmd_RIU_req_t *aReq,
   /***********************************************************************/
 
   if( status != SKV_SUCCESS )
-    return InitKVRDMAEvent( aCookie, aValueRDMADest, status );
+    return InitKVRDMAEvent( aKVReq->mCookie, &ValueRDMADest, status );
 
   /*******************************************************************
    * Get the data copied or rdma'd into the new record
    ******************************************************************/
-  if( aReq->mFlags & SKV_COMMAND_RIU_INSERT_KEY_VALUE_FIT_IN_CTL_MSG )
+  if( Req->mFlags & SKV_COMMAND_RIU_INSERT_KEY_VALUE_FIT_IN_CTL_MSG )
   {
     BegLogLine( SKV_LOCAL_KV_BACKEND_LOG )
       << "skv_local_kv_asyncmem::Insert():: inserting value with FIT_IN_CTL_MSG"
       << " len: " << ValueSize
       << EndLogLine;
 
-    memcpy( (void *) aValueRDMADest->GetAddr(),
-            &aReq->mKeyValue.mData[KeySize],
+    memcpy( (void *) ValueRDMADest.GetAddr(),
+            &Req->mKeyValue.mData[KeySize],
             ValueSize );
 
   }
@@ -629,8 +796,7 @@ skv_local_kv_asyncmem::Insert( skv_cmd_RIU_req_t *aReq,
     // signal that this command is going to require async data transfer
     status = SKV_ERRNO_NEED_DATA_TRANSFER;
 
-  status = InitKVRDMAEvent( aCookie, aValueRDMADest, status );
-
+  status = InitKVRDMAEvent( aKVReq->mCookie, &ValueRDMADest, status );
   return status;
 }
 
@@ -641,6 +807,10 @@ skv_local_kv_asyncmem::Insert( skv_pds_id_t& aPDSId,
                                int aValueSize,
                                skv_local_kv_cookie_t *aCookie )
 {
+  /* ONLY USED BY BULK-INSERT. No need to go async here. The caller is already in async mode when we get here.
+   * - in general, a back-end impl will have to be able to go async. One way would be to extract the args to
+   *   call the other insert command.
+   */
   return mPDSManager.Insert( aPDSId,
                              aRecordRep,
                              aKeySize,
@@ -664,10 +834,27 @@ skv_local_kv_asyncmem::BulkInsert( skv_pds_id_t aPDSId,
                                    skv_lmr_triplet_t *aLocalBuffer,
                                    skv_local_kv_cookie_t *aCookie )
 {
-  int             LocalBufferSize = aLocalBuffer->GetLen();
-  char*           LocalBufferAddr = (char *)aLocalBuffer->GetAddr();
-  it_lmr_handle_t LocalBufferLMR = aLocalBuffer->GetLMRHandle();
+  skv_local_kv_request_t *kvReq = mRequestQueue.AcquireRequestEntry();
+  if( !kvReq )
+    return SKV_ERRNO_COMMAND_LIMIT_REACHED;
 
+  kvReq->InitCommon( SKV_LOCAL_KV_REQUEST_TYPE_BULK_INSERT, aCookie );
+  kvReq->mRequest.mBulkInsert.mPDSId = aPDSId;
+  kvReq->mRequest.mBulkInsert.mLocalBuffer = *aLocalBuffer;
+
+  mRequestQueue.QueueRequest( kvReq );
+  return SKV_ERRNO_LOCAL_KV_EVENT;
+}
+
+skv_status_t
+skv_local_kv_asyncmem::PerformBulkInsert( skv_local_kv_request_t *aReq )
+{
+  struct skv_local_kv_bulkinsert_request_t *BIReq = &aReq->mRequest.mBulkInsert;
+  int             LocalBufferSize = BIReq->mLocalBuffer.GetLen();
+  char*           LocalBufferAddr = (char *)BIReq->mLocalBuffer.GetAddr();
+  it_lmr_handle_t LocalBufferLMR = BIReq->mLocalBuffer.GetLMRHandle();
+
+// \todo Adjust checksum handling to be covered by the back-end API
 #ifdef SKV_BULK_LOAD_CHECKSUM
   uint64_t  BufferChecksum       = 0;
   uint64_t  RemoteBufferChecksum = Command->mCommandState.mCommandBulkInsert.mRemoteBufferChecksum;
@@ -746,7 +933,7 @@ skv_local_kv_asyncmem::BulkInsert( skv_pds_id_t aPDSId,
 
   BegLogLine(  SKV_LOCAL_KV_BACKEND_LOG )
     << "skv_local_kv_inmem:: "
-    << " PDSId: " << aPDSId
+    << " PDSId: " << BIReq->mPDSId
     << " LocalBufferSize: " << LocalBufferSize
     << " LocalBuffer: " << (void *) LocalBufferAddr
     << " LocalBufferLMR: " << (void *) LocalBufferLMR
@@ -779,7 +966,7 @@ skv_local_kv_asyncmem::BulkInsert( skv_pds_id_t aPDSId,
 
     // Check if the key exists
     skv_lmr_triplet_t ValueRepInStore;
-    skv_status_t status = mPDSManager.Retrieve( aPDSId,
+    skv_status_t status = mPDSManager.Retrieve( BIReq->mPDSId,
                                                 KeyPtr,
                                                 KeySize,
                                                 0,
@@ -789,7 +976,7 @@ skv_local_kv_asyncmem::BulkInsert( skv_pds_id_t aPDSId,
 
     int TotalSize = KeySize + ValueSize;
 
-#if SKV_LOCAL_KV_BACKEND_LOG
+#if 0 // SKV_LOCAL_KV_BACKEND_LOG
     int BytesInRow = skv_bulk_insert_get_total_len( LocalBufferAddr );
 
     HexDump FxString( LocalBufferAddr, BytesInRow );
@@ -812,7 +999,7 @@ skv_local_kv_asyncmem::BulkInsert( skv_pds_id_t aPDSId,
     {
       static unsigned long long DupCount = 0;
 
-      Deallocate( aLocalBuffer );
+      Deallocate( &BIReq->mLocalBuffer );
       LoopStatus = SKV_ERRNO_RECORD_ALREADY_EXISTS;
 
       DupCount++;
@@ -846,7 +1033,7 @@ skv_local_kv_asyncmem::BulkInsert( skv_pds_id_t aPDSId,
     /****************************************************
      * Insert the record into local store.
      ****************************************************/
-    status = Insert( aPDSId,
+    status = Insert( BIReq->mPDSId,
                      LocalStoreAddr,
                      KeySize,
                      ValueSize,
@@ -858,9 +1045,8 @@ skv_local_kv_asyncmem::BulkInsert( skv_pds_id_t aPDSId,
       << EndLogLine;
     /****************************************************/
   }
-  return InitKVEvent( aCookie, LoopStatus );
+  return InitKVEvent( aReq->mCookie, LoopStatus );
 }
-
 
 
 skv_status_t
@@ -870,6 +1056,26 @@ skv_local_kv_asyncmem::Lookup( skv_pds_id_t aPDSId,
                             skv_cmd_RIU_flags_t aFlags,
                             skv_lmr_triplet_t *aStoredValueRep,
                             skv_local_kv_cookie_t *aCookie )
+{
+  skv_local_kv_request_t *kvReq = mRequestQueue.AcquireRequestEntry();
+  if( !kvReq )
+    return SKV_ERRNO_COMMAND_LIMIT_REACHED;
+
+  kvReq->InitCommon( SKV_LOCAL_KV_REQUEST_TYPE_LOOKUP, aCookie );
+  kvReq->mRequest.mLookup.mPDSId = aPDSId;
+  memcpy( &kvReq->mData[ 0 ],
+          aKeyPtr,
+          aKeySize>SKV_CONTROL_MESSAGE_SIZE ? SKV_CONTROL_MESSAGE_SIZE : aKeySize );
+  kvReq->mRequest.mLookup.mKeyData = &kvReq->mData[ 0 ];
+  kvReq->mRequest.mLookup.mKeySize = aKeySize;
+  kvReq->mRequest.mLookup.mFlags = aFlags;
+
+  mRequestQueue.QueueRequest( kvReq );
+  return SKV_ERRNO_LOCAL_KV_EVENT;
+}
+
+skv_status_t
+skv_local_kv_asyncmem::PerformLookup( skv_local_kv_request_t *aReq )
 {
   BegLogLine( SKV_LOCAL_KV_BACKEND_LOG )
     << "skv_local_kv_asyncmem::Lookup():: Entering"
@@ -884,12 +1090,12 @@ skv_local_kv_asyncmem::Lookup( skv_pds_id_t aPDSId,
   skv_lmr_triplet_t StoredValueRep;
 
   // Check if the key exists
-  status = mPDSManager.Retrieve( aPDSId,
-                                 aKeyPtr,
-                                 aKeySize,
+  status = mPDSManager.Retrieve( aReq->mRequest.mLookup.mPDSId,
+                                 aReq->mRequest.mLookup.mKeyData,
+                                 aReq->mRequest.mLookup.mKeySize,
                                  0,
                                  0,
-                                 aFlags,
+                                 aReq->mRequest.mLookup.mFlags,
                                  &StoredValueRep );
 
   gSKVServerInsertRetrieveFromTreeFinis.HitOE( SKV_SERVER_INSERT_TRACE,
@@ -897,9 +1103,10 @@ skv_local_kv_asyncmem::Lookup( skv_pds_id_t aPDSId,
                                                mMyRank,
                                                gSKVServerInsertRetrieveFromTreeFinis );
 
-  status = InitKVEvent( aCookie, &StoredValueRep, status );
+  status = InitKVEvent( aReq->mCookie, &StoredValueRep, status );
   return status;
 }
+
 
 skv_status_t
 skv_local_kv_asyncmem::Retrieve( skv_pds_id_t aPDSId,
@@ -912,44 +1119,70 @@ skv_local_kv_asyncmem::Retrieve( skv_pds_id_t aPDSId,
                               int *aTotalSize,
                               skv_local_kv_cookie_t *aCookie )
 {
-  skv_status_t status = mPDSManager.Retrieve( aPDSId,
-                                              aKeyData,
-                                              aKeySize,
-                                              aValueOffset,
-                                              aValueSize,
-                                              aFlags,
-                                              aStoredValueRep );
+  skv_local_kv_request_t *kvReq = mRequestQueue.AcquireRequestEntry();
+  if( !kvReq )
+    return SKV_ERRNO_COMMAND_LIMIT_REACHED;
+
+  kvReq->InitCommon( SKV_LOCAL_KV_REQUEST_TYPE_RETRIEVE, aCookie );
+  kvReq->mRequest.mRetrieve.mPDSId = aPDSId;
+  memcpy( &kvReq->mData[ 0 ],
+          aKeyData,
+          aKeySize>SKV_CONTROL_MESSAGE_SIZE ? SKV_CONTROL_MESSAGE_SIZE : aKeySize );
+  kvReq->mRequest.mRetrieve.mKeyData = &kvReq->mData[ 0 ];
+  kvReq->mRequest.mRetrieve.mKeySize = aKeySize;
+  kvReq->mRequest.mRetrieve.mValueOffset = aValueOffset;
+  kvReq->mRequest.mRetrieve.mValueSize = aValueSize;
+  kvReq->mRequest.mRetrieve.mFlags = aFlags;
+
+  mRequestQueue.QueueRequest( kvReq );
+  return SKV_ERRNO_LOCAL_KV_EVENT;
+}
+
+skv_status_t
+skv_local_kv_asyncmem::PerformRetrieve( skv_local_kv_request_t *aReq )
+{
+  size_t TotalSize;
+  skv_lmr_triplet_t StoredValueRep;
+  skv_local_kv_retrieve_request_t *Retrieve = &aReq->mRequest.mRetrieve;
+
+  skv_status_t status = mPDSManager.Retrieve( Retrieve->mPDSId,
+                                              Retrieve->mKeyData,
+                                              Retrieve->mKeySize,
+                                              Retrieve->mValueOffset,
+                                              Retrieve->mValueSize,
+                                              Retrieve->mFlags,
+                                              &StoredValueRep );
 
   int ValueOversize = 0;
   if (status == SKV_SUCCESS)
   {
-    *aTotalSize = aStoredValueRep->GetLen();
-    ValueOversize = aStoredValueRep->GetLen() - aValueSize;
+    TotalSize = StoredValueRep.GetLen();
+    ValueOversize = StoredValueRep.GetLen() - Retrieve->mValueSize;
     if( ValueOversize > 0 )
     {
       BegLogLine( SKV_LOCAL_KV_BACKEND_LOG )
         << "skv_local_kv_asyncmem:: ADJUSTING rdma_write length to match smaller client buffer"
-        << " client: " << aValueSize
-        << " store: " << aStoredValueRep->GetLen()
+        << " client: " << Retrieve->mValueSize
+        << " store: " << StoredValueRep.GetLen()
         << EndLogLine;
 
-      aStoredValueRep->SetLenIfSmaller( aValueSize );
+      StoredValueRep.SetLenIfSmaller( Retrieve->mValueSize );
     }
 
-    if( !(aFlags & SKV_COMMAND_RIU_RETRIEVE_VALUE_FIT_IN_CTL_MSG) )
+    if( !(Retrieve->mFlags & SKV_COMMAND_RIU_RETRIEVE_VALUE_FIT_IN_CTL_MSG) )
       status = SKV_ERRNO_NEED_DATA_TRANSFER;
   }
   else
-    *aTotalSize = 0;
+    TotalSize = 0;
 
   BegLogLine( SKV_LOCAL_KV_BACKEND_LOG )
-    << "skv_local_kv_asyncmem:: storing valueRep:" << *aStoredValueRep
+    << "skv_local_kv_asyncmem:: storing valueRep:" << StoredValueRep
     << " status:" << skv_status_to_string( status )
     << EndLogLine;
 
-  status = InitKVRDMAEvent( aCookie,
-                            aStoredValueRep,
-                            *aTotalSize,
+  status = InitKVRDMAEvent( aReq->mCookie,
+                            &StoredValueRep,
+                            TotalSize,
                             status );
   return status;
 }
@@ -963,6 +1196,7 @@ skv_local_kv_asyncmem::RetrievePostProcess(   skv_local_kv_req_ctx_t *aReqCtx )
   return status;
 }
 
+
 skv_status_t
 skv_local_kv_asyncmem::RetrieveNKeys( skv_pds_id_t aPDSId,
                                    char * aStartingKeyData,
@@ -974,17 +1208,65 @@ skv_local_kv_asyncmem::RetrieveNKeys( skv_pds_id_t aPDSId,
                                    skv_cursor_flags_t aFlags,
                                    skv_local_kv_cookie_t *aCookie )
 {
+  skv_local_kv_request_t *kvReq = mRequestQueue.AcquireRequestEntry();
+  if( !kvReq )
+    return SKV_ERRNO_COMMAND_LIMIT_REACHED;
+
+  kvReq->InitCommon( SKV_LOCAL_KV_REQUEST_TYPE_RETRIEVE_N, aCookie );
+  kvReq->mRequest.mRetrieveN.mPDSId = aPDSId;
+
+  //  skv_lmr_triplet_t *RetrievedKeysSizesSegs = (skv_lmr_triplet_t*)new char( 2 * aListOfKeysMaxCount * sizeof(skv_lmr_triplet_t) );
+  kvReq->mRequest.mRetrieveN.mRetrievedKeysSizesSegs = aRetrievedKeysSizesSegs;
+
+  size_t copy_size = aStartingKeySize;
+  // make sure the copy size is limited to the message size
+  if( aStartingKeySize > SKV_CONTROL_MESSAGE_SIZE )
+    copy_size = SKV_CONTROL_MESSAGE_SIZE;
+  memcpy( &kvReq->mData[ 0 ],
+          aStartingKeyData,
+          copy_size );
+  // startkeysize of zero indicates, no starting key
+  kvReq->mRequest.mRetrieveN.mStartingKeyData = &kvReq->mData[ 0 ];
+  kvReq->mRequest.mRetrieveN.mStartingKeySize = copy_size;
+  kvReq->mRequest.mRetrieveN.mListOfKeysMaxCount = aListOfKeysMaxCount;
+  kvReq->mRequest.mRetrieveN.mFlags = aFlags;
+
+  BegLogLine( SKV_LOCAL_KV_BACKEND_LOG )
+    << "skv_local_kv_asyncmem:: retrieveNkeys storing request"
+    << " MaxKeyCount: " << kvReq->mRequest.mRetrieveN.mListOfKeysMaxCount
+    << " KeyData@: " << (void*)kvReq->mRequest.mRetrieveN.mStartingKeyData
+    << " KeySize: " << kvReq->mRequest.mRetrieveN.mStartingKeySize
+    << EndLogLine;
+
+
+  mRequestQueue.QueueRequest( kvReq );
+  return SKV_ERRNO_LOCAL_KV_EVENT;
+}
+
+skv_status_t
+skv_local_kv_asyncmem::PerformRetrieveNKeys( skv_local_kv_request_t *aReq )
+{
+  skv_local_kv_retrieveN_request_t *RNReq = &aReq->mRequest.mRetrieveN;
   int RetrievedKeysCount = 0;
   int RetrievedKeysSizesSegsCount = 0;
-  skv_lmr_triplet_t *RetrievedKeysSizesSegs = (skv_lmr_triplet_t*)new char( 2 * aListOfKeysMaxCount * sizeof(skv_lmr_triplet_t) );
-  skv_status_t status = mPDSManager.RetrieveNKeys( aPDSId,
-                                                   aStartingKeyData,
-                                                   aStartingKeySize,
-                                                   RetrievedKeysSizesSegs,
+
+  BegLogLine( SKV_LOCAL_KV_BACKEND_LOG )
+    << "skv_local_kv_asyncmem:: retrieveNkeys starting..."
+    << " PDSid: " << RNReq->mPDSId
+    << " MaxKeyCount: " << RNReq->mListOfKeysMaxCount
+    << " KeyData@: " << (void*)RNReq->mStartingKeyData
+    << " KeySize: " << RNReq->mStartingKeySize
+    << " Flags: " << RNReq->mFlags
+    << EndLogLine;
+
+  skv_status_t status = mPDSManager.RetrieveNKeys( RNReq->mPDSId,
+                                                   RNReq->mStartingKeyData,
+                                                   RNReq->mStartingKeySize,
+                                                   RNReq->mRetrievedKeysSizesSegs,
                                                    &RetrievedKeysCount,
                                                    &RetrievedKeysSizesSegsCount,
-                                                   aListOfKeysMaxCount,
-                                                   aFlags );
+                                                   RNReq->mListOfKeysMaxCount,
+                                                   RNReq->mFlags );
   BegLogLine( SKV_LOCAL_KV_BACKEND_LOG )
     << "skv_local_kv_asyncmem:: retrieveNkeys completed"
     << " KeyCount: " << RetrievedKeysCount
@@ -992,8 +1274,8 @@ skv_local_kv_asyncmem::RetrieveNKeys( skv_pds_id_t aPDSId,
     << " status: " << skv_status_to_string( status )
     << EndLogLine;
 
-  status = InitKVEvent( aCookie,
-                        RetrievedKeysSizesSegs,
+  status = InitKVEvent( aReq->mCookie,
+                        RNReq->mRetrievedKeysSizesSegs,
                         RetrievedKeysCount,
                         RetrievedKeysSizesSegsCount,
                         status );
@@ -1007,13 +1289,32 @@ skv_local_kv_asyncmem::Remove( skv_pds_id_t aPDSId,
                             int aKeySize,
                             skv_local_kv_cookie_t *aCookie )
 {
-  skv_status_t status = mPDSManager.Remove( aPDSId,
-                                            aKeyData,
-                                            aKeySize );
-  status = InitKVEvent( aCookie,
-                        status );
+  skv_local_kv_request_t *kvReq = mRequestQueue.AcquireRequestEntry();
+  if( !kvReq )
+    return SKV_ERRNO_COMMAND_LIMIT_REACHED;
+
+  kvReq->InitCommon( SKV_LOCAL_KV_REQUEST_TYPE_REMOVE, aCookie );
+  kvReq->mRequest.mRemove.mPDSId = aPDSId;
+  memcpy( &kvReq->mData[ 0 ],
+          aKeyData,
+          aKeySize>SKV_CONTROL_MESSAGE_SIZE ? SKV_CONTROL_MESSAGE_SIZE : aKeySize );
+  kvReq->mRequest.mRemove.mKeyData = &kvReq->mData[ 0 ];
+  kvReq->mRequest.mRemove.mKeySize = aKeySize;
+
+  mRequestQueue.QueueRequest( kvReq );
+  return SKV_ERRNO_LOCAL_KV_EVENT;
+}
+
+skv_status_t
+skv_local_kv_asyncmem::PerformRemove( skv_local_kv_request_t *aReq )
+{
+  skv_status_t status = mPDSManager.Remove( aReq->mRequest.mRemove.mPDSId,
+                                            aReq->mRequest.mRemove.mKeyData,
+                                            aReq->mRequest.mRemove.mKeySize );
+  status = InitKVEvent( aReq->mCookie, status );
   return status;
 }
+
 
 skv_status_t
 skv_local_kv_asyncmem::CreateCursor( char* aBuff,
@@ -1061,26 +1362,6 @@ skv_status_t
 skv_local_kv_asyncmem::Deallocate ( skv_lmr_triplet_t *aRDMARep )
 {
    return mPDSManager.Deallocate( aRDMARep );
-}
-
-skv_status_t skv_local_kv_asyncmem::CreateEvent( skv_local_kv_cookie_t* aCookie )
-{
-  skv_status_t status = SKV_ERRNO_LOCAL_KV_EVENT;
-
-  skv_local_kv_event_t *Event = &(mEventQueue[0]);
-  mActiveEventQueue[ 0 ] = Event;
-
-  Event->mType = SKV_SERVER_EVENT_TYPE_LOCAL_KV_CMPL;
-  Event->mCookie = *aCookie;
-
-  BegLogLine( SKV_LOCAL_KV_BACKEND_LOG )
-    << "skv_local_kv_asyncmem::CreateEvent(): Event created"
-    << " @" << (void*)Event
-    << " type: " << skv_server_event_type_to_string( Event->mType )
-    << " cookie: " << *aCookie
-    << EndLogLine;
-
-  return status;
 }
 
 skv_status_t

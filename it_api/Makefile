@@ -1,28 +1,30 @@
 ########################################
-# Copyright (c) IBM Corp. 2007-2014
+# Copyright (c) IBM Corp. 2014
 # All rights reserved. This program and the accompanying materials
 # are made available under the terms of the Eclipse Public License v1.0
 # which accompanies this distribution, and is available at
 # http://www.eclipse.org/legal/epl-v10.html
+########################################
 #
 # Contributors:
 #     arayshu, lschneid - initial implementation
-########################################
 
-ifndef TOP
-    TOP = $(shell cd ..; pwd)
-    export TOP
+ifndef ITAPE_TOP
+    ITAPE_TOP=$(shell while ! test -e make.conf.in; do cd ..; done; pwd)
+    export ITAPE_TOP
 endif
 
-include $(TOP)/it_api/make.conf
+include $(ITAPE_TOP)/make.conf
 
-MAX_JOBS=$(shell grep -c '^processor' /proc/cpuinfo)
 
 BUILD=${IT_API_DEST}
 
-.PHONY: $(BUILD) all
+.PHONY: build install
 
-all:
+all: build
+
+build:
+	@echo "BUILDING TARGETS: ${BUILD}"
 	@set -e; for i in $(BUILD); do \
 		make -C $$i; \
 	done
@@ -47,6 +49,5 @@ distclean:
 	-rm -f make.conf
 
 
-$(TOP)/it_api/make.conf:
+$(ITAPE_TOP)/make.conf:
 	./bootstrap.sh
-

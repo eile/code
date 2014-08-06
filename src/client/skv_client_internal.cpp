@@ -1,13 +1,15 @@
 /************************************************
- * Copyright (c) IBM Corp. 2007-2014
+ * Copyright (c) IBM Corp. 2014
  * All rights reserved. This program and the accompanying materials
  * are made available under the terms of the Eclipse Public License v1.0
  * which accompanies this distribution, and is available at
  * http://www.eclipse.org/legal/epl-v10.html
- * 
+ *************************************************/
+
+/*
  * Contributors:
  *     arayshu, lschneid - initial implementation
- *************************************************/
+ */
 
 #include <client/skv_client_internal.hpp>
 #include <common/skv_utils.hpp>
@@ -60,17 +62,19 @@ TraceClient gSKVClientiInsertFinis;
 #ifdef SKV_CLIENT_UNI
 skv_status_t
 skv_client_internal_t::
-Init( skv_client_group_id_t  aCommGroupId,  
-      int                     aFlags )
+Init( skv_client_group_id_t aCommGroupId,
+      int aFlags,
+      const char* aConfigFile )
 {
   mMyRank = 0;
   mClientGroupCount = 1;
 #else
 skv_status_t
 skv_client_internal_t::
-Init( skv_client_group_id_t  aCommGroupId,  
-      MPI_Comm                aComm,
-      int                     aFlags )
+Init( skv_client_group_id_t aCommGroupId,
+      MPI_Comm aComm,
+      int aFlags,
+      const char* aConfigFile )
 {
   mComm = aComm;
   MPI_Comm_rank( aComm, & mMyRank );
@@ -95,7 +99,7 @@ Init( skv_client_group_id_t  aCommGroupId,
     << " mClientGroupCount: " << mClientGroupCount
     << EndLogLine;
 
-  mSKVConfiguration = skv_configuration_t::GetSKVConfiguration();
+  mSKVConfiguration = skv_configuration_t::GetSKVConfiguration( aConfigFile );
 
   /************************************************************
    * Initialize the interface adapter
@@ -195,7 +199,7 @@ Disconnect()
  ***/
 skv_status_t 
 skv_client_internal_t::
-Connect( const char* aServerGroupName, 
+Connect( const char* aConfigFile,
          int   aFlags )
 {
   BegLogLine( SKV_CLIENT_CONNECTION_LOG )
@@ -213,7 +217,7 @@ Connect( const char* aServerGroupName,
    * of a file which contains the skv server
    * addresses
    *****************************************/
-  skv_status_t status = mConnMgrIF.Connect( aServerGroupName, aFlags );
+  skv_status_t status = mConnMgrIF.Connect( aConfigFile, aFlags );
 
   StrongAssertLogLine( status == SKV_SUCCESS )
     << "skv_client_internal_t::Connect():: ERROR:: "
@@ -224,7 +228,7 @@ Connect( const char* aServerGroupName,
 
   BegLogLine( SKV_CLIENT_CONNECTION_LOG )
     << "skv_client_internal_t::Connect():: Connected to " 
-    << " aServerGroupName: " << aServerGroupName    
+    << " aServerGroupName: " << aConfigFile
     << EndLogLine;  
   /*****************************************/  
 
@@ -1065,11 +1069,6 @@ Close( skv_pds_id_t* aPDSId )
 
   status = Wait( CmdHdl );  
 
-  AssertLogLine( status == SKV_SUCCESS )
-    << "skv_client_internal_t::Close:: "
-    << " status: " << skv_status_to_string( status )
-    << EndLogLine;
-
   return status;
 }
 
@@ -1093,11 +1092,6 @@ PDScntl( skv_pdscntl_cmd_t  aCmd,
     return status;
 
   status = Wait( CmdHdl );  
-
-  AssertLogLine( status == SKV_SUCCESS )
-    << "skv_client_internal_t::PDScntl():: "
-    << " status: " << skv_status_to_string( status )
-    << EndLogLine;
 
   return status;
 }
@@ -1187,11 +1181,6 @@ Update( skv_pds_id_t*         aPDSId,
     return status;
 
   status = Wait( CmdHdl );  
-
-  AssertLogLine( status == SKV_SUCCESS )
-    << "skv_client_internal_t::Update:: "
-    << " status: " << skv_status_to_string( status )
-    << EndLogLine;
 
   return status;
 }
@@ -1311,11 +1300,6 @@ RetrieveDistribution( skv_distribution_t* aDist )
   /*****************************************************/
 
   status = Wait( CmdCtrlBlk );
-
-  AssertLogLine( status == SKV_SUCCESS )
-    << "skv_client_internal_t::Open():: "
-    << " status: " << skv_status_to_string( status )
-    << EndLogLine;
 
   BegLogLine( SKV_CLIENT_RETRIEVE_DIST_LOG )
     << "skv_client_internal_t::RetrieveDistribution():: Leaving"
@@ -1462,14 +1446,25 @@ skv_status_t
 skv_client_internal_t::
 Finalize()
 {
+  it_status_t istatus = IT_SUCCESS;
+  skv_status_t status = SKV_SUCCESS;
+
   mCCBMgrIF.Finalize();
 
-  mConnMgrIF.Finalize();
+  status = mConnMgrIF.Finalize();
 
   mCommandMgrIF.Finalize();
 
-  it_pz_free( mPZ_Hdl );
-  it_ia_free( mIA_Hdl );
+  istatus = it_pz_free( mPZ_Hdl );
+
+  if( istatus != IT_SUCCESS )
+    status = SKV_ERRNO_UNSPECIFIED_ERROR;
+
+  istatus = it_ia_free( mIA_Hdl );
+  if( istatus != IT_SUCCESS )
+    status = SKV_ERRNO_UNSPECIFIED_ERROR;
+
+  return status;
 }
 
 /** \brief non-blocking remove of record from kv-store

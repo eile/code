@@ -7,6 +7,8 @@
 #
 ########################################
 
+RPM_DIR := $(CURDIR)/../..
+
 CXXFLAGS = -I. -IPk \
 	-DPKTRACE_WORKING \
 	-D NO_SETPRI \
@@ -51,21 +53,42 @@ CFLAGS=-I. -IPk \
 
 C_SRCS=dlmalloc.c
 
+
 OBJS=$(SRCS:%.cpp=%.o) $(C_SRCS:%.c=%.o)
 
+#CXX=$(CROSS_CXX)
+#CC=$(CROSS_CC)
+AR?=ar
+
 libPkLinux.a: $(OBJS)
-	ar r $@ $^
+	$(AR) r $@ $^
 
 install: libPkLinux.a
-
+ifdef INSTALL_ROOTFS_DIR
+	install -D -m 644 libPkLinux.a ${INSTALL_ROOTFS_DIR}/opt/fxlogger/lib
+	install -D -m 644 Pk/FxLogger.hpp ${INSTALL_ROOTFS_DIR}/opt/fxlogger/include
+	install -D -m 644 Pk/Trace.hpp ${INSTALL_ROOTFS_DIR}/opt/fxlogger/include
+else
+	echo "libPkLinux: Nothing to install."
+endif
 
 clean:
-	rm $(OBJS) $(SRCS:.cpp=.d) libPkLinux.a
+	$(RM) $(OBJS) $(SRCS:.cpp=.d) libPkLinux.a
 
+# include Make.versions
+-include ../../linux/Make.versions
+ARCH=`/bin/arch`
+.PHONY: rpm
+rpm:
+	rpmbuild -bb \
+		--define "_topdir $(RPM_DIR)"  \
+		--define "FXLOGGER_DIR $(CURDIR)" \
+		--define "RPM_VERSION $(RPM_VERSION)" \
+          ./fxlogger.spec
+	mkdir -p $(RPM_DIR)/frontendnode-opt-RPMS && \
+	cp $(RPM_DIR)/RPMS/$(ARCH)/bgas-fxlogger-$(RPM_VERSION)*.rpm $(RPM_DIR)/frontendnode-opt-RPMS
 
-#
-# generic dependency rules
-#
+# dependency rules
 %.d: %.c
 	$(SHELL) -ec '$(CC) -M $(CFLAGS) $< | sed "s,$*.o,& $@,g" > $@'
 
