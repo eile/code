@@ -29,16 +29,20 @@ class skv_local_kv_request_queue_t {
   skv_array_queue_t< skv_local_kv_request_t*, SKV_LOCAL_KV_MAX_REQUESTS > mActiveRequests;
   skv_local_kv_request_t *mRequestPool;
   size_t mLenght;
-  skv_mutex_t mQueueSerializer;
+  skv_mutex_t mLock;
+  pthread_cond_t  mCond;
+
   volatile int mFreeSlots;
 
 public:
   skv_local_kv_request_queue_t( const size_t aSize = SKV_LOCAL_KV_MAX_REQUESTS ) : mFreeSlots( 0 ), mLenght( std::min( (size_t)aSize, (size_t)SKV_LOCAL_KV_MAX_REQUESTS ) )
   {
     mRequestPool = new skv_local_kv_request_t[ mLenght ];
+    pthread_cond_init( &mCond, 0 );
   }
   ~skv_local_kv_request_queue_t()
   {
+    pthread_cond_destroy( &mCond );
     if( mRequestPool != NULL )
       delete [] mRequestPool;
   }
@@ -68,19 +72,20 @@ public:
     if( mFreeRequests.empty() || (mActiveRequests.size() > mLenght-2) )
       return NULL;
 
-    mQueueSerializer.lock();
+    mLock.lock();
     skv_local_kv_request_t *Req = mFreeRequests.top();
     --mFreeSlots;
     mFreeRequests.pop();
-    mQueueSerializer.unlock();
+    mLock.unlock();
 
     return Req;
   }
   void QueueRequest( skv_local_kv_request_t *aReq )
   {
-    mQueueSerializer.lock();
+    mLock.lock();
     mActiveRequests.push( aReq );
-    mQueueSerializer.unlock();
+    mLock.unlock();
+    pthread_cond_signal( &mCond );
   }
   bool IsEmpty()
   {
@@ -90,28 +95,28 @@ public:
   {
     skv_local_kv_request_t *Request = NULL;
 
-    mQueueSerializer.lock();
-    if( ! mActiveRequests.empty() )
-    {
-      Request = mActiveRequests.front();
-      mActiveRequests.pop();
+    mLock.lock();
+    while( mActiveRequests.empty( ))
+        pthread_cond_wait( &mCond, &mLock.mMutex );
 
-      BegLogLine( SKV_LOCAL_KV_QUEUES_LOG )
+    Request = mActiveRequests.front();
+    mActiveRequests.pop();
+
+    BegLogLine( SKV_LOCAL_KV_QUEUES_LOG )
         << "skv_local_kv_request_queue_t::GetRequest() Request fetched"
         << " @" << (void*)Request
         << EndLogLine;
-    }
-    mQueueSerializer.unlock();
+    mLock.unlock();
 
     return Request;
   }
 
   skv_status_t AckRequest( skv_local_kv_request_t* aRequest )
   {
-    mQueueSerializer.lock();
+    mLock.lock();
     mFreeRequests.push( aRequest );
     ++mFreeSlots;
-    mQueueSerializer.unlock();
+    mLock.unlock();
 
     BegLogLine( SKV_LOCAL_KV_QUEUES_LOG )
       << "skv_local_kv_request_queue_t::AckRequest() Request returned"

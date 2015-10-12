@@ -23,7 +23,6 @@
 /* This is a dumb impl to encapsulate locking via pthread_mutex to work around old compilers not able to cope with C++11
  * This could be removed once we decide to require C++11 compiler support for whole SKV */
 class skv_mutex_t {
-  pthread_mutex_t mMutex;
 #if (SKV_MUTEX_LOG != 0)
   int mLogThisMutex;
 #else
@@ -31,6 +30,7 @@ class skv_mutex_t {
 #endif
 
 public:
+  pthread_mutex_t mMutex;
 #if (SKV_MUTEX_LOG == 0)
   skv_mutex_t( const pthread_mutexattr_t *aAttributes = NULL )
 #else
