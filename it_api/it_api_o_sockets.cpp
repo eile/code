@@ -2935,6 +2935,11 @@ it_status_t it_ia_create (
   setsockopt( drc_serv_socket, SOL_SOCKET, SO_REUSEADDR, (char *)&True, sizeof( True ) );
   True = 1;
   setsockopt( drc_serv_socket, SOL_TCP, TCP_NODELAY, (char*)&True, sizeof(True));
+  const int size = 128768;
+  setsockopt( drc_serv_socket, SOL_SOCKET, SO_RCVBUF,
+              reinterpret_cast<const char*>( &size ), sizeof( size ));
+  setsockopt( drc_serv_socket, SOL_SOCKET, SO_SNDBUF,
+              reinterpret_cast<const char*>( &size ), sizeof( size ));
 #endif
 
   int brc;
@@ -3017,6 +3022,10 @@ it_status_t it_ia_create (
 
   True = 1;
   setsockopt( drc_cli_socket, SOL_TCP, TCP_NODELAY, (char*)&True, sizeof(True));
+  setsockopt( drc_cli_socket, SOL_SOCKET, SO_RCVBUF,
+              reinterpret_cast<const char*>( &size ), sizeof( size ));
+  setsockopt( drc_cli_socket, SOL_SOCKET, SO_SNDBUF,
+              reinterpret_cast<const char*>( &size ), sizeof( size ));
 
   StrongAssertLogLine( drc_cli_socket >= 0 )
     << "it_ia_create(): ERROR: "
@@ -4035,6 +4044,11 @@ it_status_t it_listen_create (
 
   int True = 1;
   setsockopt( s, SOL_TCP, TCP_NODELAY, (char*)&True, sizeof(True));
+  const int size = 128768;
+  setsockopt( s, SOL_SOCKET, SO_RCVBUF,
+              reinterpret_cast<const char*>( &size ), sizeof( size ));
+  setsockopt( s, SOL_SOCKET, SO_SNDBUF,
+              reinterpret_cast<const char*>( &size ), sizeof( size ));
 
   int SockSendBuffSize = -1;
   // BGF size_t ArgSize = sizeof( int );
@@ -4268,6 +4282,11 @@ it_status_t it_ep_connect (
 
   int True = 1;
   setsockopt( s, SOL_TCP, TCP_NODELAY, (char*)&True, sizeof(True));
+  const int size = 128768;
+  setsockopt( s, SOL_SOCKET, SO_RCVBUF,
+              reinterpret_cast<const char*>( &size ), sizeof( size ));
+  setsockopt( s, SOL_SOCKET, SO_SNDBUF,
+              reinterpret_cast<const char*>( &size ), sizeof( size ));
 
 #ifdef IT_API_OVER_UNIX_DOMAIN_SOCKETS
     struct sockaddr_un serv_addr;
@@ -5779,6 +5798,11 @@ it_status_t it_prepare_connection(
 
   int True = 1;
   setsockopt( s, SOL_TCP, TCP_NODELAY, (char*)&True, sizeof(True));
+  const int size = 128768;
+  setsockopt( s, SOL_SOCKET, SO_RCVBUF,
+              reinterpret_cast<const char*>( &size ), sizeof( size ));
+  setsockopt( s, SOL_SOCKET, SO_SNDBUF,
+              reinterpret_cast<const char*>( &size ), sizeof( size ));
 
 #ifdef IT_API_OVER_UNIX_DOMAIN_SOCKETS
   struct sockaddr_un serv_addr;
@@ -5849,6 +5873,11 @@ iWARPEM_CreateAndConnectMasterSocket( struct sockaddr_in *aServerAddr, int aLoca
 
   int True = 1;
   setsockopt( MasterSocket, SOL_TCP, TCP_NODELAY, (char*)&True, sizeof(True));
+  const int size = 128768;
+  setsockopt( MasterSocket, SOL_SOCKET, SO_RCVBUF,
+              reinterpret_cast<const char*>( &size ), sizeof( size ));
+  setsockopt( MasterSocket, SOL_SOCKET, SO_SNDBUF,
+              reinterpret_cast<const char*>( &size ), sizeof( size ));
 
   int rc = 0;
   while( 1 )
@@ -6136,6 +6165,11 @@ it_status_t itx_ep_connect_with_rmr (
 
   int True = 1;
   setsockopt( s, SOL_TCP, TCP_NODELAY, (char*)&True, sizeof(True));
+  const int size = 128768;
+  setsockopt( s, SOL_SOCKET, SO_RCVBUF,
+              reinterpret_cast<const char*>( &size ), sizeof( size ));
+  setsockopt( s, SOL_SOCKET, SO_SNDBUF,
+              reinterpret_cast<const char*>( &size ), sizeof( size ));
 
   int SockSendBuffSize = -1;
   int SockRecvBuffSize = -1;

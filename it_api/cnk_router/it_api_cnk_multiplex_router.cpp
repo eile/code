@@ -1621,6 +1621,11 @@ static pthread_t setup_polling_thread(void)
     setsockopt( drc_serv_socket, SOL_SOCKET, SO_REUSEADDR, (char *)&True, sizeof( True ) );
     True = 1;
     setsockopt( drc_serv_socket, SOL_TCP, TCP_NODELAY, (char*)&True, sizeof(True));
+    const int size = 128768;
+    setsockopt( drc_serv_socket, SOL_SOCKET, SO_RCVBUF,
+                reinterpret_cast<const char*>( &size ), sizeof( size ));
+    setsockopt( drc_serv_socket, SOL_SOCKET, SO_SNDBUF,
+                reinterpret_cast<const char*>( &size ), sizeof( size ));
 
     int brc= bind( drc_serv_socket, drc_serv_saddr, drc_serv_addr_len ) ;
     StrongAssertLogLine(brc == 0 )
@@ -1673,6 +1678,10 @@ static pthread_t setup_polling_thread(void)
 
     True = 1;
     setsockopt( drc_cli_socket, SOL_TCP, TCP_NODELAY, (char*)&True, sizeof(True));
+    setsockopt( drc_cli_socket, SOL_SOCKET, SO_RCVBUF,
+                reinterpret_cast<const char*>( &size ), sizeof( size ));
+    setsockopt( drc_cli_socket, SOL_SOCKET, SO_SNDBUF,
+                reinterpret_cast<const char*>( &size ), sizeof( size ));
 
     if( listen( drc_serv_socket, 5 ) < 0 )
       {
@@ -2021,6 +2030,11 @@ int ConnectToServers( int aMyRank, const skv_configuration_t *config )
 
       int True = 1;
       setsockopt( connections[conn_count].socket, SOL_TCP, TCP_NODELAY, (char*)&True, sizeof(True));
+      const int size = 128768;
+      setsockopt( connections[conn_count].socket, SOL_SOCKET, SO_RCVBUF,
+                  reinterpret_cast<const char*>( &size ), sizeof( size ));
+      setsockopt( connections[conn_count].socket, SOL_SOCKET, SO_SNDBUF,
+                  reinterpret_cast<const char*>( &size ), sizeof( size ));
 
       connected = ( connect( connections[ conn_count ].socket, srv->ai_addr, srv->ai_addrlen ) == 0 );
       if ( connected )
